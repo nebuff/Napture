@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Napture updating</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-app: #0F0F14;
+      --bg-card: rgba(18, 19, 26, 0.85);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-primary: #ffffff;
+      --text-secondary: #a9b1d6;
+      --text-muted: #8F90A6;
+      --accent: #7f8cff;
+      --accent-glow: rgba(127, 140, 255, 0.35);
+      --font-main: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      background-color: var(--bg-app);
+      color: var(--text-primary);
+      font-family: var(--font-main);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      -webkit-app-region: drag;
+    }
+    .updater-card {
+      width: 86%;
+      max-width: 400px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      padding: 28px 24px;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+      backdrop-filter: blur(12px);
+      -webkit-app-region: no-drag;
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    .brand-logo {
+      width: 44px;
+      height: 44px;
+      object-fit: contain;
+      filter: drop-shadow(0 4px 12px var(--accent-glow));
+      animation: pulse 2.4s infinite ease-in-out;
+    }
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .brand-title {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      letter-spacing: -0.3px;
+      line-height: 1.2;
+    }
+    .brand-author {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.2px;
+    }
+    .status-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 6px;
+    }
+    .status-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 20px;
+      min-height: 18px;
+    }
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: #171822;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 12px;
+      position: relative;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #6c7af7 0%, #7f8cff 50%, #9ca8ff 100%);
+      box-shadow: 0 0 12px var(--accent-glow);
+      border-radius: 4px;
+      transition: width 0.2s cubic-bezier(0.1, 0.8, 0.1, 1);
+    }
+    .progress-fill.indeterminate {
+      width: 40% !important;
+      position: absolute;
+      animation: indeterminate 1.5s infinite ease-in-out;
+    }
+    .metrics-row {
+      display: flex;
+      justify-content: space-between;
+      width: 100%;
+      font-size: 11px;
+      color: var(--text-secondary);
+      font-weight: 500;
+    }
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+        filter: drop-shadow(0 4px 12px var(--accent-glow));
+      }
+      50% {
+        transform: scale(1.05);
+        filter: drop-shadow(0 6px 20px rgba(127, 140, 255, 0.55));
+      }
+    }
+    @keyframes indeterminate {
+      0% { left: -40%; }
+      100% { left: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="updater-card">
+    <div class="brand-group">
+      {{LOGO_PLACEHOLDER}}
+      <div class="brand-text">
+        <span class="brand-title">Napture</span>
+        <span class="brand-author">| By nebuff</span>
+      </div>
+    </div>
+
+    <div class="status-title" id="status-title">Napture updating</div>
+    <div class="status-subtitle" id="status-subtitle">Downloading update package...</div>
+
+    <div class="progress-track">
+      <div class="progress-fill" id="progress-bar"></div>
+    </div>
+
+    <div class="metrics-row">
+      <span id="speed-val">0 KB/s</span>
+      <span id="time-val">Calculating...</span>
+    </div>
+  </div>
+
+  <script>
+    const progressBar = document.getElementById('progress-bar');
+    const statusTitle = document.getElementById('status-title');
+    const statusSubtitle = document.getElementById('status-subtitle');
+    const speedVal = document.getElementById('speed-val');
+    const timeVal = document.getElementById('time-val');
+
+    if (window.naptureAPI && window.naptureAPI.onUpdateDownloadProgress) {
+      window.naptureAPI.onUpdateDownloadProgress((data) => {
+        const { percent, speedBps, remainingSeconds, isExtracting } = data;
+
+        if (isExtracting) {
+          statusTitle.textContent = 'Installing update';
+          statusSubtitle.textContent = 'Extracting and applying files...';
+          progressBar.classList.add('indeterminate');
+          speedVal.textContent = 'Finishing up';
+          timeVal.textContent = 'Please wait...';
+          return;
+        }
+
+        progressBar.classList.remove('indeterminate');
+        progressBar.style.width = Math.min(100, Math.max(0, percent)) + '%';
+        statusTitle.textContent = 'Napture updating';
+        statusSubtitle.textContent = 'Downloading update package... ' + percent + '%';
+
+        // Speed string
+        let speedStr = '0 KB/s';
+        if (speedBps > 1024 * 1024) {
+          speedStr = (speedBps / (1024 * 1024)).toFixed(1) + ' MB/s';
+        } else if (speedBps > 1024) {
+          speedStr = (speedBps / 1024).toFixed(0) + ' KB/s';
+        } else {
+          speedStr = Math.round(speedBps) + ' B/s';
+        }
+        speedVal.textContent = speedStr;
+
+        // Time string
+        if (remainingSeconds === undefined || remainingSeconds < 0) {
+          timeVal.textContent = 'Calculating...';
+        } else if (remainingSeconds === 0) {
+          timeVal.textContent = 'Download complete';
+        } else if (remainingSeconds < 60) {
+          timeVal.textContent = remainingSeconds + 's remaining';
+        } else {
+          const mins = Math.floor(remainingSeconds / 60);
+          const secs = remainingSeconds % 60;
+          timeVal.textContent = mins + 'm ' + secs + 's remaining';
+        }
+      });
+    }
+
+    if (window.naptureAPI && window.naptureAPI.onUpdateDownloadError) {
+      window.naptureAPI.onUpdateDownloadError((data) => {
+        statusTitle.textContent = 'Update failed';
+        statusSubtitle.textContent = data.error || 'An error occurred during update.';
+        progressBar.classList.remove('indeterminate');
+        progressBar.style.background = '#ff5c5c';
+        progressBar.style.boxShadow = '0 0 12px rgba(255, 92, 92, 0.4)';
+        progressBar.style.width = '100%';
+        speedVal.textContent = 'Error';
+        timeVal.textContent = 'Closing shortly...';
+      });
+    }
+  </script>
+</body>
+</html>

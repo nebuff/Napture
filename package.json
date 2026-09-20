@@ -1,0 +1,213 @@
+{
+  "name": "napture",
+  "version": "0.22.0",
+  "desktopName": "Napture",
+  "description": "Fast, modern, lightweight desktop web browser powered by Electron and Chromium",
+  "main": "napture/main.js",
+  "scripts": {
+    "start": "electron .",
+    "start:native": "node scripts/run-native.js",
+    "build:native": "node scripts/build-native-engine.js",
+    "test": "jest",
+    "update-engine": "node scripts/update-engine.js",
+    "package:win": "node scripts/package-win.js",
+    "package:linux": "node scripts/package-linux.js",
+    "package:mac": "node scripts/package-mac.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win --x64 --arm64 --publish never",
+    "dist:mac": "electron-builder --mac --x64 --arm64 --publish never",
+    "dist:linux": "node scripts/package-linux.js",
+    "dist:all": "electron-builder --win --linux --mac --x64 --arm64 --publish never"
+  },
+  "keywords": [
+    "browser",
+    "electron",
+    "chromium",
+    "lightweight",
+    "privacy"
+  ],
+  "author": "Napture Team",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^45.0.0-alpha.9",
+    "electron-builder": "^26.15.3",
+    "express": "^4.19.2",
+    "jest": "^30.4.2",
+    "marked": "^12.0.0",
+    "semver": "^7.6.0",
+    "yaml": "^2.4.1"
+  },
+  "jest": {
+    "testMatch": [
+      "<rootDir>/tests/**/*.test.js"
+    ],
+    "testPathIgnorePatterns": [
+      "[\\\\/]node_modules[\\\\/]",
+      "[\\\\/]dist[\\\\/]"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/dist",
+      ".*[\\\\/]dist[\\\\/].*"
+    ]
+  },
+  "build": {
+    "appId": "com.napture.browser",
+    "productName": "Napture",
+    "icon": "napture/build/icons/512x512.png",
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "napture/**/*",
+      "versions.json",
+      "package.json"
+    ],
+    "win": {
+      "icon": "napture/logo.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "napture/build/installer.nsh",
+      "artifactName": "napture-${version}-${arch}-windows.${ext}"
+    },
+    "portable": {
+      "artifactName": "napture-${version}-${arch}-windows-portable.${ext}"
+    },
+    "mac": {
+      "icon": "napture/build/icon.icns",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": "napture/build/entitlements.mac.plist",
+      "entitlementsInherit": "napture/build/entitlements.mac.inherit.plist",
+      "artifactName": "napture-${version}-${arch}-macos.${ext}"
+    },
+    "dmg": {
+      "icon": "napture/build/icon.icns",
+      "backgroundColor": "#1a1a24",
+      "background": null,
+      "title": "${productName} ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ],
+      "window": {
+        "width": 540,
+        "height": 380
+      }
+    },
+    "protocols": [
+      {
+        "name": "HTTP URL",
+        "schemes": [
+          "http",
+          "https"
+        ]
+      }
+    ],
+    "fileAssociations": [
+      {
+        "ext": "html",
+        "name": "HTML Document",
+        "description": "HTML Document"
+      },
+      {
+        "ext": "htm",
+        "name": "HTML Document",
+        "description": "HTML Document"
+      }
+    ],
+    "linux": {
+      "icon": "napture/build/icons",
+      "synopsis": "Lightweight, cross-platform Chromium Forked web browser",
+      "description": "Lightweight, cross-platform Chromium Forked web browser",
+      "category": "Network;WebBrowser",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "Napture"
+        }
+      },
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ],
+      "mimeTypes": [
+        "x-scheme-handler/http",
+        "x-scheme-handler/https",
+        "text/html"
+      ],
+      "artifactName": "napture-${version}-${arch}-linux.${ext}"
+    },
+    "flatpak": {
+      "branch": "stable",
+      "runtimeVersion": "25.08",
+      "useWaylandFlags": true,
+      "finishArgs": [
+        "--share=ipc",
+        "--share=network",
+        "--socket=x11",
+        "--socket=wayland",
+        "--socket=pulseaudio",
+        "--filesystem=host",
+        "--device=all",
+        "--talk-name=org.freedesktop.Notifications"
+      ]
+    },
+    "snap": {
+      "grade": "stable",
+      "confinement": "classic",
+      "summary": "Lightweight, cross-platform Chromium Forked web browser"
+    }
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.12",
+    "better-sqlite3": "^13.0.3",
+    "compression": "^1.7.4",
+    "cookie-parser": "^1.4.6",
+    "cors": "^2.8.5",
+    "debug": "^4.4.0",
+    "dotenv": "^16.4.7",
+    "helmet": "^7.1.0",
+    "isexe": "^4.0.0",
+    "ws": "^8.21.3"
+  }
+}

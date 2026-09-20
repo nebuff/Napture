@@ -1,0 +1,7 @@
+{
+  "napture": "0.22.0",
+  "newebxEngine": "v0.9b15265",
+  "enableNeProtocol": false,
+  "enableBlurBackground": false,
+  "chromiumVersion": "153.0.8010.52"
+}

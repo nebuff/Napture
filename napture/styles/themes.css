@@ -1,0 +1,267 @@
+:root {
+  /* Core Theme Colors */
+  --bg-app: transparent;
+  --bg-sidebar: transparent;
+
+  /* Unified Surfaces & Containers */
+  --bg-surface: rgba(18, 19, 26, 0.94);
+  --bg-surface-glass: rgba(26, 27, 38, 0.88);
+  --bg-surface-glass-solid: rgba(20, 21, 30, 0.90);
+  --bg-backdrop: rgba(10, 11, 14, 0.85);
+
+  --bg-card: rgba(18, 19, 26, 0.6);
+  --bg-input: #12131a;
+  --bg-hover: #2a2b36;
+  --bg-active: #20212a;
+
+  --border-color: rgba(255, 255, 255, 0.12);
+  --border-focus: #7f8cff;
+
+  --text-primary: #ffffff;
+  --text-secondary: #a9b1d6;
+  --text-muted: #565f89;
+
+  --accent: #7f8cff;
+  --accent-hover: #6c7af7;
+
+  --danger: #e81123;
+  --danger-hover: #c40e1d;
+  --success: #28a745;
+
+  /* Typography & Geometry */
+  --font-main: 'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --radius-base: 14px;
+  --radius-large: 16px;
+
+  /* Shadow */
+  --shadow-popup: 0 20px 48px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+body.has-light-theme, body.light-theme {
+  --bg-surface: rgba(240, 242, 248, 0.96);
+  --bg-surface-glass: rgba(255, 255, 255, 0.92);
+  --bg-surface-glass-solid: rgba(255, 255, 255, 0.92);
+  --bg-backdrop: rgba(255, 255, 255, 0.7);
+
+  --bg-card: #ffffff;
+  --bg-input: #f0f2f8;
+  --bg-hover: #e0e5f2;
+  --bg-active: #d0d7e6;
+
+  --border-color: rgba(0, 0, 0, 0.12);
+  --border-focus: #4b5be5;
+
+  --text-primary: #12131a;
+  --text-secondary: #4a5578;
+  --text-muted: #8c96ba;
+
+  --accent: #4b5be5;
+  --accent-hover: #3a47b8;
+
+  --danger: #d90f1e;
+  --danger-hover: #b30c18;
+  --success: #218838;
+
+  --shadow-popup: 0 20px 48px rgba(0, 0, 0, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+/* ==========================================================================
+   UNIFIED MODALS
+   ========================================================================== */
+
+.napture-modal-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-backdrop);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99999;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  opacity: 0;
+  animation: modalOverlayFadeIn 0.2s forwards;
+}
+
+.napture-modal-overlay.hidden {
+  display: none !important;
+}
+
+.napture-modal-box {
+  background-color: var(--bg-surface-glass-solid);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-large);
+  width: 100%;
+  max-width: 460px;
+  padding: 24px;
+  box-shadow: var(--shadow-popup);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.napture-modal-header {
+  margin-bottom: 12px;
+}
+
+.napture-modal-title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: var(--text-primary);
+}
+
+.napture-modal-desc {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 0 0 20px 0;
+  line-height: 1.5;
+}
+
+.napture-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* ==========================================================================
+   UNIFIED POPUPS (Dropdowns, Context Menus, Toolbars)
+   ========================================================================== */
+
+.napture-popup {
+  position: absolute;
+  background: linear-gradient(135deg, var(--bg-surface-glass), var(--bg-surface));
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-base);
+  padding: 6px;
+  box-shadow: var(--shadow-popup);
+  z-index: 99999;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  animation: popupSlideDown 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: background 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+  pointer-events: auto !important;
+  -webkit-app-region: no-drag !important;
+}
+
+body.is-welcome-tab .napture-popup,
+#header-bar.is-welcome-tab .napture-popup {
+  background: var(--bg-surface-glass-solid) !important;
+  backdrop-filter: blur(24px) saturate(180%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(180%) !important;
+  border-color: rgba(255, 255, 255, 0.15) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.08) !important;
+}
+
+body.has-light-theme.is-welcome-tab .napture-popup,
+body.has-light-theme #header-bar.is-welcome-tab .napture-popup {
+  background: var(--bg-surface-glass-solid) !important;
+  border-color: rgba(0, 0, 0, 0.15) !important;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(0, 0, 0, 0.08) !important;
+}
+
+.napture-popup.closing {
+  animation: popupSlideUp 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  pointer-events: none;
+}
+
+.napture-popup.hidden {
+  display: none !important;
+}
+
+.napture-popup-content {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.napture-popup-footer {
+  padding: 8px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 4px;
+}
+
+/* ==========================================================================
+   UNIFIED CONTROLS (Buttons, Inputs)
+   ========================================================================== */
+
+.napture-btn {
+  padding: 8px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  background-color: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: var(--font-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.napture-btn:hover {
+  background-color: var(--bg-hover);
+}
+
+.napture-btn-primary {
+  background-color: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+.napture-btn-primary:hover {
+  background-color: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* ==========================================================================
+   ANIMATIONS
+   ========================================================================== */
+
+@keyframes modalOverlayFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes popupSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popupSlideUp {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
