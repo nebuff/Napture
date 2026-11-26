@@ -10,6 +10,9 @@
 
 </div>
 
+> [!NOTE]
+> Napture is not **Abandoned** it is being remade for the modern web, Hopefully soon Napture will be ready again from is once was..
+
 ---
 
 ## Overview
