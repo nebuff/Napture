@@ -1,6 +1,6 @@
 {
   "name": "napture",
-  "version": "0.22.0",
+  "version": "0.22.1",
   "desktopName": "Napture",
   "description": "Fast, modern, lightweight desktop web browser powered by Electron and Chromium",
   "main": "napture/main.js",
