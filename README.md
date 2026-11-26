@@ -10,6 +10,12 @@
 
 </div>
 
+> [!NOTE]
+> Napture is not **Abandoned** it is being remade for the modern web, Hopefully soon Napture will be ready again from is once was..
+
+> [!WARNING]
+> Anything under 0.21.4 is when Napture was dropped off, Those releases were very **unstable** and close too unusable. Now they **shouldn't** be used because of the very old chromium version it is based off of
+
 ---
 
 ## Overview
