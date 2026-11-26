@@ -696,22 +696,21 @@ function setupProtocolHandlers() {
 }
 
 function buildWelcomePage() {
-  let searchEngine = 'napture';
+  let searchEngine = 'duckduckgo';
   try {
-    searchEngine = getSetting('searchEngine', 'napture');
+    searchEngine = getSetting('searchEngine', 'duckduckgo');
   } catch (e) {
     console.error('Error fetching search engine setting for welcome page:', e);
   }
 
   const engineUrls = {
-    napture: 'https://search.nebuff.xyz/search',
     google: 'https://google.com/search',
     duckduckgo: 'https://duckduckgo.com/',
     bing: 'https://www.bing.com/search',
     brave: 'https://search.brave.com/search',
     ecosia: 'https://www.ecosia.org/search'
   };
-  const searchBase = engineUrls[searchEngine] || engineUrls.napture;
+  const searchBase = engineUrls[searchEngine] || engineUrls.duckduckgo;
 
   return [
     '<!DOCTYPE html>',

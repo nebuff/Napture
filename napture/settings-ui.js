@@ -136,7 +136,7 @@ function getDefaultSettings() {
     httpsOnly: false,
 
     // 3. Search Engine
-    searchEngine: 'napture',
+    searchEngine: 'duckduckgo',
 
     // 4. Startup
     startupMode: 'restore_all',
@@ -1831,7 +1831,6 @@ function buildSettingsPage() {
                 <div class="row-desc">${t('search_engine_desc')}</div>
               </div>
               <select id="setting-searchEngine">
-                <option value="napture" ${settings.searchEngine === 'napture' ? 'selected' : ''}>Napture Search (Default)</option>
                 <option value="google" ${settings.searchEngine === 'google' ? 'selected' : ''}>Google</option>
                 <option value="duckduckgo" ${settings.searchEngine === 'duckduckgo' ? 'selected' : ''}>DuckDuckGo</option>
                 <option value="bing" ${settings.searchEngine === 'bing' ? 'selected' : ''}>Microsoft Bing</option>

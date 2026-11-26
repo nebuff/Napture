@@ -487,7 +487,7 @@ function getChangedUserSettings() {
     ]),
     addressSuggestions: true,
     showFullUrl: false,
-    searchEngine: 'napture',
+    searchEngine: 'duckduckgo',
     safeBrowsing: 'standard',
     blockCookies: 'incognito',
     doNotTrack: false,

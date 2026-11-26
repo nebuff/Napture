@@ -3492,22 +3492,7 @@ ipcMain.on('reload', (event) => {
 ipcMain.handle('get-suggestions', async (event, query) => {
   if (!query) return ['', []];
 
-  // 1. Primary: Napture Search Suggestions API
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 1200);
-    const res = await fetch(`https://search.nebuff.xyz/api/suggestions?q=${encodeURIComponent(query)}`, {
-      signal: controller.signal,
-      headers: { 'Accept': 'application/x-suggestions+json, application/json' }
-    });
-    clearTimeout(timer);
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data)) return data;
-    }
-  } catch (e) {}
-
-  // 2. Direct Fallback
+  // 1. Search suggestions from Google's public suggestion endpoint
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 1000);
@@ -5428,7 +5413,7 @@ function getDefaultSettings() {
     switchToExistingTab: true,
     fontFamily: 'Inter, Outfit, sans-serif',
     fontSize: 'medium',
-    searchEngine: 'napture',
+    searchEngine: 'duckduckgo',
     addressSuggestions: true,
     showFullUrl: false,
     safeBrowsing: 'standard',

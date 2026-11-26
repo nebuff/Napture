@@ -73,7 +73,7 @@ const DEFAULT_SIDEBAR_BOTTOM_LAYOUT = [
 ];
 
 let currentSettings = {
-  searchEngine: 'napture',
+  searchEngine: 'duckduckgo',
   addressSuggestions: true,
   showFullUrl: false,
   showHomeBtn: true,
@@ -1954,14 +1954,13 @@ function handleAddressSubmit() {
     url = 'https://' + url;
   } else {
     const engineUrls = {
-      napture: 'https://search.nebuff.xyz/search?q=',
       google: 'https://google.com/search?q=',
       duckduckgo: 'https://duckduckgo.com/?q=',
       bing: 'https://www.bing.com/search?q=',
       brave: 'https://search.brave.com/search?q=',
       ecosia: 'https://www.ecosia.org/search?q='
     };
-    const searchBase = engineUrls[currentSettings.searchEngine] || engineUrls.napture;
+    const searchBase = engineUrls[currentSettings.searchEngine] || engineUrls.duckduckgo;
     url = `${searchBase}${encodeURIComponent(url)}`;
   }
 

@@ -4,7 +4,7 @@ project(NaptureNative)
 set(CMAKE_CXX_STANDARD 17)
 
 # Set CEF Root
-set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.deps/cef_binary_154.0.23+g062ebe4+chromium-154.0.8037.17_linux64_beta_minimal")
+set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../.deps/cef_binary_158.0.6+g23f1736+chromium-158.0.8127.89_linux64_minimal")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CEF_ROOT}/cmake")
 
 # Find CEF
