@@ -5,7 +5,8 @@ node_modules/
 
 # Build outputs & installers
 dist/
-build/
+/build/
+napture/build/native/
 *.app/
 *.exe
 *.dmg
