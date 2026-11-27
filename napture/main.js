@@ -1119,7 +1119,8 @@ if (!gotTheLock) {
 }
 
 const { registerCustomProtocols, setupProtocolHandlers } = require('./protocol-handler');
-const { buildSettingsPage } = require('./settings-ui');
+const { buildSettingsPage, DEFAULT_TOOLBAR_LAYOUT } = require('./settings-ui');
+const extensionHost = require('./extensions');
 const syncEngine = require('./db/sync-engine');
 
 // Enforce hardware acceleration toggle before app ready
@@ -4205,7 +4206,9 @@ function openSettingsWindow(options) {
   closeSecondaryWindows(settingsWindow);
   const focusedWindow = BrowserWindow.getFocusedWindow() || Array.from(browserWindows)[0];
   if (focusedWindow && !focusedWindow.isDestroyed()) {
-    focusedWindow.webContents.send('close-all-popups');
+    // Hide in-page panels, but do not let the renderer close secondary windows:
+    // that path would close the settings window we are about to open.
+    focusedWindow.webContents.send('close-popups-keep-secondary');
   }
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
@@ -4547,6 +4550,222 @@ ipcMain.handle('save-setting', (event, { key, value }) => {
     scheduleDebouncedSyncPush();
   }
   return res;
+});
+
+// --- Chrome extensions ---
+function readToolbarLayoutSetting() {
+  try {
+    const parsed = JSON.parse(getSetting('toolbarLayout', '') || 'null');
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_TOOLBAR_LAYOUT));
+}
+
+function writeToolbarLayoutSetting(layout) {
+  const json = JSON.stringify(layout);
+  setSetting('toolbarLayout', json);
+  broadcastSettingChanged('toolbarLayout', json);
+}
+
+function addExtensionToolbarButton(ext) {
+  const layout = readToolbarLayoutSetting();
+  const itemId = 'ext:' + ext.id;
+  const next = layout.filter((item) => item && item.id !== itemId);
+  next.push({ id: itemId, type: 'extension', extensionId: ext.id, name: ext.name, enabled: true });
+  writeToolbarLayoutSetting(next);
+}
+
+function removeExtensionToolbarButton(extensionId) {
+  const layout = readToolbarLayoutSetting();
+  const itemId = 'ext:' + extensionId;
+  writeToolbarLayoutSetting(layout.filter((item) => item && item.id !== itemId));
+}
+
+function broadcastExtensionsChanged() {
+  const payload = extensionHost.list();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('extensions-changed', payload);
+    }
+  }
+  if (typeof tabViews !== 'undefined' && tabViews) {
+    for (const view of tabViews.values()) {
+      if (view && view.webContents && !view.webContents.isDestroyed()) {
+        view.webContents.send('extensions-changed', payload);
+      }
+    }
+  }
+}
+
+let extensionPopupWindow = null;
+let extensionPopupId = null;
+let extensionPopupParent = null;
+
+function openExtensionPopup(event, payload) {
+  const extensionId = payload && payload.extensionId;
+  const rect = (payload && payload.rect) || { left: 0, bottom: 0 };
+  const popupUrl = extensionHost.getPopupUrl(extensionId);
+  const parentWin = BrowserWindow.fromWebContents(event.sender);
+  if (!popupUrl || !parentWin || parentWin.isDestroyed()) return;
+
+  if (extensionPopupWindow && !extensionPopupWindow.isDestroyed()) {
+    const wasSame = extensionPopupId === extensionId;
+    extensionPopupWindow.close();
+    if (wasSame) return;
+  }
+
+  const width = 400;
+  const height = 600;
+  const bounds = parentWin.getContentBounds();
+  const maxX = bounds.x + Math.max(0, bounds.width - width - 12);
+  const maxY = bounds.y + Math.max(0, bounds.height - height - 12);
+  const x = Math.round(Math.min(Math.max(bounds.x + 8, bounds.x + rect.left), maxX));
+  const y = Math.round(Math.min(bounds.y + (rect.bottom || 0) + 6, maxY));
+
+  const popup = new BrowserWindow({
+    parent: parentWin,
+    frame: false,
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    x,
+    y,
+    width,
+    height,
+    backgroundColor: '#171720',
+    webPreferences: {
+      preload: path.join(__dirname, 'extension-popup-preload.js'),
+      sandbox: true,
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  extensionPopupWindow = popup;
+  extensionPopupId = extensionId;
+  extensionPopupParent = parentWin;
+
+  popup.loadURL(popupUrl);
+  popup.once('ready-to-show', () => { if (!popup.isDestroyed()) popup.show(); });
+  popup.on('blur', () => { if (!popup.isDestroyed()) popup.close(); });
+  popup.on('closed', () => {
+    try { if (popup.webContents && popup.webContents.debugger.isAttached()) popup.webContents.debugger.detach(); } catch (e) {}
+    if (extensionPopupWindow === popup) {
+      extensionPopupWindow = null;
+      extensionPopupId = null;
+      extensionPopupParent = null;
+    }
+  });
+}
+
+// Tabs opened by extension popups through chrome.tabs.create.
+// These are regular Napture tabs: we ask the window renderer to create one and
+// keep a synthetic chrome.tabs entry so the extension can query/focus it.
+const extensionTabs = new Map();
+let nextExtensionTabId = 100000;
+
+// Extensions act while their popup has focus, so the focused window is the popup
+// itself (which ignores open-url-in-new-tab). Target the popup's parent app window.
+function getExtensionTargetWindow() {
+  if (extensionPopupParent && !extensionPopupParent.isDestroyed()) return extensionPopupParent;
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && browserWindows.has(focused)) return focused;
+  for (const win of browserWindows) {
+    if (win && !win.isDestroyed()) return win;
+  }
+  return null;
+}
+
+function openExtensionTab(props) {
+  const url = props && typeof props.url === 'string' && props.url ? props.url : 'about:blank';
+  const id = nextExtensionTabId++;
+  const win = getExtensionTargetWindow();
+  const tab = {
+    id,
+    windowId: win && !win.isDestroyed() ? win.id : -1,
+    active: true,
+    highlighted: true,
+    pinned: false,
+    incognito: false,
+    url,
+    title: ''
+  };
+  extensionTabs.set(id, tab);
+
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('open-url-in-new-tab', { url });
+  }
+
+  return tab;
+}
+
+ipcMain.handle('extensions:tabs-create', (event, props) => openExtensionTab(props));
+
+ipcMain.handle('extensions:open-full-page', () => {
+  if (!extensionPopupId) return null;
+  const popupUrl = extensionHost.getPopupUrl(extensionPopupId);
+  if (!popupUrl) return null;
+  const tab = openExtensionTab({ url: popupUrl + '#/' });
+  if (extensionPopupWindow && !extensionPopupWindow.isDestroyed()) extensionPopupWindow.close();
+  return tab;
+});
+
+ipcMain.handle('extensions:tabs-update', (event, { id, props }) => {
+  const tab = extensionTabs.get(id);
+  if (!tab) return null;
+  const nextUrl = props && typeof props.url === 'string' ? props.url : '';
+  if (nextUrl && nextUrl !== tab.url) {
+    tab.url = nextUrl;
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('open-url-in-new-tab', { url: nextUrl });
+    }
+  }
+  return tab;
+});
+
+ipcMain.handle('extensions:tabs-query', (event, query) => {
+  const pattern = query && typeof query.url === 'string' ? query.url : null;
+  const normalized = pattern ? pattern.replace(/\*/g, '') : null;
+  const list = [];
+  for (const tab of extensionTabs.values()) {
+    if (normalized && (!tab.url || !tab.url.startsWith(normalized))) continue;
+    list.push(tab);
+  }
+  return list;
+});
+
+ipcMain.handle('extensions:window-update', (event, { id, props }) => {
+  const win = BrowserWindow.fromId(id);
+  if (!win || win.isDestroyed()) return null;
+  if (!props || props.focused !== false) win.focus();
+  return { id: win.id, focused: true };
+});
+
+ipcMain.handle('extensions:list', () => extensionHost.list());
+
+ipcMain.handle('extensions:install', async (event, input) => {
+  const ext = await extensionHost.installFromStore(input);
+  addExtensionToolbarButton(ext);
+  broadcastExtensionsChanged();
+  return ext;
+});
+
+ipcMain.handle('extensions:remove', async (event, extensionId) => {
+  const list = await extensionHost.remove(extensionId);
+  removeExtensionToolbarButton(extensionId);
+  broadcastExtensionsChanged();
+  return list;
+});
+
+ipcMain.on('extensions:open-popup', (event, payload) => {
+  openExtensionPopup(event, payload);
 });
 
 ipcMain.handle('save-all-settings', (event, settings) => {
@@ -6750,6 +6969,13 @@ app.whenReady().then(async () => {
       broadcastDownloadUpdated();
     });
   });
+
+  // Load any installed Chrome extensions into the default session before tabs open
+  try {
+    await extensionHost.init();
+  } catch (e) {
+    console.error('Failed to initialize extension host:', e && e.message);
+  }
 
   createBrowserWindow();
 

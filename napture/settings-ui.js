@@ -31,7 +31,7 @@ function validateToolbarLayout(layout, defaultLayout = null) {
     return JSON.parse(JSON.stringify(fallback));
   }
 
-  const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator']);
+  const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator', 'extension']);
   const knownSystemIds = new Set([
     'brand-menu-btn', 'back-btn', 'forward-btn', 'reload-btn', 'home-btn',
     'address-container', 'downloads-btn', 'history-btn', 'bookmarks-btn', 'newtab-btn'
@@ -43,7 +43,7 @@ function validateToolbarLayout(layout, defaultLayout = null) {
 
   for (const item of layout) {
     if (!item || typeof item !== 'object') continue;
-    let { id, type, name, url, width, enabled, children } = item;
+    let { id, type, name, url, width, enabled, children, extensionId } = item;
 
     if (!id || typeof id !== 'string') continue;
     id = id.trim();
@@ -89,6 +89,10 @@ function validateToolbarLayout(layout, defaultLayout = null) {
 
     if (type === 'folder') {
       cleanItem.children = Array.isArray(children) ? children.filter(c => c && c.id) : [];
+    }
+
+    if (type === 'extension' && extensionId) {
+      cleanItem.extensionId = String(extensionId);
     }
 
     if (width && typeof width === 'number' && width > 0) {
@@ -1411,6 +1415,32 @@ function buildSettingsPage() {
       background: rgba(127, 140, 255, 0.12);
       color: var(--accent);
     }
+    .extension-row-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 7px;
+      background: var(--bg-hover);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      margin-right: 12px;
+      color: var(--text-secondary);
+    }
+    .extension-row-icon img {
+      width: 18px;
+      height: 18px;
+      object-fit: contain;
+    }
+    .slot-icon img,
+    .tray-card-icon img,
+    .preview-item img {
+      width: 14px;
+      height: 14px;
+      object-fit: contain;
+      border-radius: 3px;
+      display: block;
+    }
   </style>
 </head>
 <body>
@@ -1442,6 +1472,12 @@ function buildSettingsPage() {
           <line x1="9" y1="21" x2="9" y2="9"></line>
         </svg>
         <span>${t('nav_toolbar')}</span>
+      </li>
+      <li class="nav-item" data-target="extensions">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v4h1.5a2.5 2.5 0 0 1 0 5H2v4a2 2 0 0 0 2 2h4v-1.5a2.5 2.5 0 0 1 5 0V22h4a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"></path>
+        </svg>
+        <span>${t('nav_extensions')}</span>
       </li>
       <li class="nav-item" data-target="snippets">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1640,6 +1676,34 @@ function buildSettingsPage() {
               <button class="btn btn-primary" id="btn-customize-toolbar">${t('customize_toolbar_btn') || 'Customize Toolbar'}</button>
             </div>
           </div>
+        </div>
+
+        <!-- SECTION: Chrome Extensions -->
+        <div class="section" id="sec-extensions">
+          <div class="section-header"><h2 class="section-title">${t('sec_extensions')}</h2></div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
+            ${t('extensions_desc')}
+          </div>
+          <div class="card-group">
+            <div class="card-row">
+              <div class="row-info">
+                <div class="row-label">${t('extension_install_label')}</div>
+                <div class="row-desc">${t('extension_install_desc')}</div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="text" id="extension-store-input" placeholder="https://chromewebstore.google.com/detail/..." style="width: 320px;">
+                <button class="btn btn-primary" id="btn-install-extension">${t('extension_install_btn')}</button>
+              </div>
+            </div>
+            <div class="card-row">
+              <div class="row-info">
+                <div class="row-label">${t('extension_toolbar_label')}</div>
+                <div class="row-desc">${t('extension_toolbar_desc')}</div>
+              </div>
+            </div>
+          </div>
+          <div class="section-header" style="margin-top: 22px;"><h2 class="section-title">${t('extension_installed_title')}</h2></div>
+          <div class="card-group" id="extensions-list-container"></div>
         </div>
 
         <!-- SECTION 3: Import Data -->
@@ -2929,7 +2993,7 @@ function buildSettingsPage() {
         return JSON.parse(JSON.stringify(fallback));
       }
 
-      const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator']);
+      const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator', 'extension']);
       const knownSystemIds = new Set([
         'brand-menu-btn', 'back-btn', 'forward-btn', 'reload-btn', 'home-btn',
         'address-container', 'downloads-btn', 'history-btn', 'bookmarks-btn', 'newtab-btn'
@@ -2941,7 +3005,7 @@ function buildSettingsPage() {
 
       for (const item of layout) {
         if (!item || typeof item !== 'object') continue;
-        let { id, type, name, url, width, enabled, children } = item;
+        let { id, type, name, url, width, enabled, children, extensionId } = item;
 
         if (!id || typeof id !== 'string') continue;
         id = id.trim();
@@ -2977,6 +3041,7 @@ function buildSettingsPage() {
 
         if (type === 'link' && url) cleanItem.url = String(url).trim();
         if (type === 'folder') cleanItem.children = Array.isArray(children) ? children.filter(c => c && c.id) : [];
+        if (type === 'extension' && extensionId) cleanItem.extensionId = String(extensionId);
         if (width && typeof width === 'number' && width > 0) cleanItem.width = width;
 
         sanitized.push(cleanItem);
@@ -3014,6 +3079,28 @@ function buildSettingsPage() {
       { id: 'template-link', type: 'link', name: 'Custom Link', desc: 'Web shortcut button', category: 'Custom', isMultiple: true, isCustomLink: true, icon: '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>' }
     ];
 
+    let extensionDescriptors = [];
+
+    function extensionIconHtml(ext) {
+      if (ext && ext.iconDataUrl) {
+        return '<img src="' + String(ext.iconDataUrl).replace(/"/g, '&quot;') + '" alt="">';
+      }
+      return '<svg viewBox="0 0 24 24" width="14" height="14" stroke="currentColor" stroke-width="2" fill="none"><path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v4h1.5a2.5 2.5 0 0 1 0 5H2v4a2 2 0 0 0 2 2h4v-1.5a2.5 2.5 0 0 1 5 0V22h4a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"></path></svg>';
+    }
+
+    function getAvailableTrayItems() {
+      const extensionItems = extensionDescriptors.filter(ext => ext.hasAction).map(ext => ({
+        id: 'ext:' + ext.id,
+        type: 'extension',
+        extensionId: ext.id,
+        name: ext.name,
+        desc: 'Extension action button',
+        isMultiple: false,
+        icon: extensionIconHtml(ext)
+      }));
+      return AVAILABLE_TRAY_ITEMS.concat(extensionItems);
+    }
+
     let currentToolbarLayout = [];
     try {
       const raw = ${JSON.stringify(settings.toolbarLayout || '')};
@@ -3044,6 +3131,10 @@ function buildSettingsPage() {
     const customizerContextMenu = document.getElementById('customizer-context-menu');
 
     function getItemIconSvg(item) {
+      if (item.type === 'extension') {
+        const ext = extensionDescriptors.find(e => e.id === item.extensionId);
+        return extensionIconHtml(ext);
+      }
       if (item.type === 'link') {
         return '<svg viewBox="0 0 24 24" width="13" height="13" stroke="currentColor" stroke-width="2" fill="none"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
       }
@@ -3426,6 +3517,8 @@ function buildSettingsPage() {
               newItem = { id: 'margin-' + Date.now(), type: 'margin', name: 'Flexible Space', enabled: true };
             } else if (draggedTrayItem.type === 'separator') {
               newItem = { id: 'sep-' + Date.now(), type: 'separator', name: 'Fixed Separator', enabled: true };
+            } else if (draggedTrayItem.type === 'extension') {
+              newItem = { id: draggedTrayItem.id, type: 'extension', extensionId: draggedTrayItem.extensionId, name: draggedTrayItem.name, enabled: true };
             } else {
               newItem = { id: draggedTrayItem.id, type: 'system', name: draggedTrayItem.name, enabled: true };
             }
@@ -3452,7 +3545,7 @@ function buildSettingsPage() {
       if (!toolbarAvailableTray) return;
       toolbarAvailableTray.innerHTML = '';
 
-      AVAILABLE_TRAY_ITEMS.forEach(trayItem => {
+      getAvailableTrayItems().forEach(trayItem => {
         const card = document.createElement('div');
         card.className = 'tray-card';
 
@@ -3526,6 +3619,8 @@ function buildSettingsPage() {
               workingToolbarLayout.push({ id: 'margin-' + Date.now(), type: 'margin', name: 'Flexible Space', enabled: true });
             } else if (trayItem.type === 'separator') {
               workingToolbarLayout.push({ id: 'sep-' + Date.now(), type: 'separator', name: 'Fixed Separator', enabled: true });
+            } else if (trayItem.type === 'extension') {
+              workingToolbarLayout.push({ id: trayItem.id, type: 'extension', extensionId: trayItem.extensionId, name: trayItem.name, enabled: true });
             } else {
               workingToolbarLayout.push({ id: trayItem.id, type: 'system', name: trayItem.name, enabled: true });
             }
@@ -3999,6 +4094,126 @@ function buildSettingsPage() {
       loadProtocolsUI();
     }
     ` : ''}
+
+    // --- Chrome Extension install / management ---
+    const extensionsListContainer = document.getElementById('extensions-list-container');
+    const extensionStoreInput = document.getElementById('extension-store-input');
+    const installExtensionBtn = document.getElementById('btn-install-extension');
+
+    function renderExtensionsList() {
+      if (!extensionsListContainer) return;
+      extensionsListContainer.innerHTML = '';
+
+      if (!extensionDescriptors.length) {
+        const empty = document.createElement('div');
+        empty.className = 'card-row';
+        const info = document.createElement('div');
+        info.className = 'row-info';
+        const desc = document.createElement('div');
+        desc.className = 'row-desc';
+        desc.textContent = ${JSON.stringify(t('extension_none_installed'))};
+        info.appendChild(desc);
+        empty.appendChild(info);
+        extensionsListContainer.appendChild(empty);
+        return;
+      }
+
+      extensionDescriptors.forEach(ext => {
+        const row = document.createElement('div');
+        row.className = 'card-row';
+
+        const icon = document.createElement('div');
+        icon.className = 'extension-row-icon';
+        if (ext.iconDataUrl) {
+          const img = document.createElement('img');
+          img.src = ext.iconDataUrl;
+          img.alt = '';
+          icon.appendChild(img);
+        } else {
+          icon.innerHTML = extensionIconHtml(null);
+        }
+        row.appendChild(icon);
+
+        const info = document.createElement('div');
+        info.className = 'row-info';
+        info.style.flex = '1';
+        const label = document.createElement('div');
+        label.className = 'row-label';
+        label.textContent = ext.name;
+        const desc = document.createElement('div');
+        desc.className = 'row-desc';
+        desc.textContent = 'v' + ext.version + ' \u2022 ' + ext.id + (ext.description ? ' \u2014 ' + ext.description : '');
+        info.appendChild(label);
+        info.appendChild(desc);
+        row.appendChild(info);
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn btn-secondary';
+        removeBtn.textContent = ${JSON.stringify(t('extension_remove_btn'))};
+        removeBtn.addEventListener('click', async () => {
+          if (!confirm(${JSON.stringify(t('extension_remove_confirm'))} + ' ' + ext.name + '?')) return;
+          removeBtn.disabled = true;
+          removeBtn.textContent = ${JSON.stringify(t('extension_removing'))};
+          try {
+            const list = await window.naptureAPI.extensionsRemove(ext.id);
+            extensionDescriptors = Array.isArray(list) ? list : [];
+            renderExtensionsList();
+            showToast(${JSON.stringify(t('extension_removed_toast'))});
+          } catch (err) {
+            removeBtn.disabled = false;
+            removeBtn.textContent = ${JSON.stringify(t('extension_remove_btn'))};
+            showToast('Remove failed: ' + (err && err.message ? err.message : err));
+          }
+        });
+        row.appendChild(removeBtn);
+
+        extensionsListContainer.appendChild(row);
+      });
+    }
+
+    async function loadExtensions() {
+      if (!window.naptureAPI || !window.naptureAPI.extensionsList) return;
+      try {
+        const list = await window.naptureAPI.extensionsList();
+        extensionDescriptors = Array.isArray(list) ? list : [];
+      } catch (e) {
+        extensionDescriptors = [];
+      }
+      renderExtensionsList();
+    }
+
+    if (installExtensionBtn) {
+      installExtensionBtn.addEventListener('click', async () => {
+        const value = extensionStoreInput ? extensionStoreInput.value.trim() : '';
+        if (!value) {
+          if (extensionStoreInput) extensionStoreInput.focus();
+          return;
+        }
+        installExtensionBtn.disabled = true;
+        installExtensionBtn.textContent = ${JSON.stringify(t('extension_installing'))};
+        try {
+          const ext = await window.naptureAPI.extensionsInstall(value);
+          if (extensionStoreInput) extensionStoreInput.value = '';
+          showToast((ext && ext.name ? ext.name : 'Extension') + ' ' + ${JSON.stringify(t('extension_installed_toast'))});
+          await loadExtensions();
+        } catch (err) {
+          const message = err && err.message ? err.message : String(err);
+          showToast('Install failed: ' + message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ''));
+        } finally {
+          installExtensionBtn.disabled = false;
+          installExtensionBtn.textContent = ${JSON.stringify(t('extension_install_btn'))};
+        }
+      });
+    }
+
+    if (window.naptureAPI && window.naptureAPI.onExtensionsChanged) {
+      window.naptureAPI.onExtensionsChanged((list) => {
+        extensionDescriptors = Array.isArray(list) ? list : [];
+        renderExtensionsList();
+      });
+    }
+
+    loadExtensions();
 
     if (window.location.hash && window.location.hash.includes('customize=true')) {
       const tbItem = document.querySelector('.nav-item[data-target="toolbar"]');
