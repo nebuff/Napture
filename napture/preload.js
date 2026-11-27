@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('naptureAPI', {
   syncBookmarkTabs: (ids) => ipcRenderer.send('sync-bookmark-tabs', ids),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   installUpdate: () => ipcRenderer.invoke('install-update'),
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
   onUpdateDownloadProgress: (callback) => {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on('update-download-progress', subscription);

@@ -4259,6 +4259,17 @@ ipcMain.on('open-settings-window', (event, options) => {
   openSettingsWindow(options);
 });
 
+// Opens http(s) links from the settings window (manual update downloads) in the
+// user's real browser instead of navigating the settings page away.
+ipcMain.handle('open-external', async (event, url) => {
+  const target = typeof url === 'string' ? url.trim() : '';
+  if (!/^https?:\/\//i.test(target)) {
+    throw new Error('Refusing to open a non-http(s) URL');
+  }
+  await shell.openExternal(target);
+  return true;
+});
+
 function broadcastSettingChanged(key, value) {
   for (const win of browserWindows) {
     if (win && !win.isDestroyed()) {

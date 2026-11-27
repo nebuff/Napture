@@ -161,6 +161,38 @@ function selectUpdateAsset(assets, options = {}) {
   return (bundles.length > 0 ? bundles : pool)[0];
 }
 
+// When a platform has no in-place update bundle the user still needs a real
+// package. These patterns pick the most useful one out of a release's assets.
+const DOWNLOAD_PREFERENCES = {
+  win32: [/^(?!.*portable).*\.exe$/, /\.exe$/],
+  darwin: [/\.dmg$/, /\.pkg$/, /\.zip$/],
+  linux: [/\.appimage$/, /\.tar\.gz$/, /\.deb$/, /\.rpm$/]
+};
+
+/**
+ * Selects the best published package to hand to someone who has to install an
+ * update by hand. Returns null when the release ships nothing for this OS.
+ */
+function selectDownloadAsset(assets, options = {}) {
+  const list = (Array.isArray(assets) ? assets : []).filter(
+    (asset) => asset && typeof asset.name === 'string' && !/\.(ya?ml|blockmap)$/i.test(asset.name)
+  );
+  const osTokens = OS_TOKENS[options.platform] || OS_TOKENS.linux;
+  const archs = archTokens(options.arch);
+
+  const forOs = list.filter((asset) => assetMatchesPlatform(asset, osTokens));
+  const forArch = forOs.filter((asset) => assetMatchesPlatform(asset, archs));
+  const pool = forArch.length > 0 ? forArch : forOs;
+  if (pool.length === 0) return null;
+
+  const preferences = DOWNLOAD_PREFERENCES[options.platform] || DOWNLOAD_PREFERENCES.linux;
+  for (const pattern of preferences) {
+    const match = pool.find((asset) => pattern.test(asset.name.toLowerCase()));
+    if (match) return match;
+  }
+  return null;
+}
+
 /** Builds the IPC payload consumed by the settings page / startup check. */
 function buildUpdateCheckResult(options = {}) {
   const channel = normalizeChannel(options.channel);
@@ -177,6 +209,10 @@ function buildUpdateCheckResult(options = {}) {
     platform: options.platform,
     arch: options.arch
   });
+  const installer = asset ? null : selectDownloadAsset(picked.release.assets, {
+    platform: options.platform,
+    arch: options.arch
+  });
 
   return {
     updateAvailable: true,
@@ -188,6 +224,10 @@ function buildUpdateCheckResult(options = {}) {
     release_url: picked.release.html_url || GITHUB_RELEASES_PAGE,
     download_url: asset ? asset.browser_download_url : null,
     download_size: asset && asset.size ? asset.size : null,
+    // Set when only a manual install is possible: the package the user should
+    // actually download for this OS/arch, not just a link to the release list.
+    installer_url: installer ? installer.browser_download_url : null,
+    installer_name: installer ? installer.name : null,
     manual: !asset
   };
 }
@@ -205,5 +245,6 @@ module.exports = {
   formatReleaseNotes,
   selectLatestRelease,
   selectUpdateAsset,
+  selectDownloadAsset,
   buildUpdateCheckResult
 };

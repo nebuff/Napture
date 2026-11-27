@@ -2974,6 +2974,16 @@ function buildSettingsPage() {
 
     if (btnCheckUpdate) {
       btnCheckUpdate.addEventListener('click', () => {
+        // A manual update opens the published installer; nothing can be installed
+        // in place on these platforms.
+        if (btnCheckUpdate.dataset.action === 'download') {
+          const downloadUrl = btnCheckUpdate.dataset.downloadUrl;
+          if (downloadUrl && window.naptureAPI && window.naptureAPI.openExternal) {
+            window.naptureAPI.openExternal(downloadUrl);
+          }
+          return;
+        }
+
         // If an update is already ready, initiate install immediately
         if (btnCheckUpdate.dataset.action === 'install') {
           btnCheckUpdate.disabled = true;
@@ -3001,12 +3011,23 @@ function buildSettingsPage() {
             btnCheckUpdate.disabled = false;
             
             if (res.updateAvailable && res.manual) {
-              delete btnCheckUpdate.dataset.action;
+              const manualUrl = res.installer_url || res.release_url;
+              if (manualUrl) {
+                btnCheckUpdate.dataset.action = 'download';
+                btnCheckUpdate.dataset.downloadUrl = manualUrl;
+              } else {
+                delete btnCheckUpdate.dataset.action;
+                delete btnCheckUpdate.dataset.downloadUrl;
+              }
               btnCheckUpdate.classList.remove('btn-success');
               btnCheckUpdate.classList.add('btn-primary');
-              if (btnCheckUpdateText) btnCheckUpdateText.textContent = 'Check Again';
+              if (btnCheckUpdateText) {
+                btnCheckUpdateText.textContent = res.installer_url ? 'Download' : 'Open Releases';
+              }
               if (updateCardStatus) {
-                updateCardStatus.innerHTML = '<span class="update-status-badge info">Version ' + res.version + ' is available. No automatic package for this platform &mdash; get it from the <a href="' + res.release_url + '" style="color: var(--accent);">GitHub release page</a>.</span>';
+                updateCardStatus.innerHTML = res.installer_url
+                  ? '<span class="update-status-badge info">Version ' + res.version + ' is available. Download the ' + res.installer_name + ' installer and run it to upgrade.</span>'
+                  : '<span class="update-status-badge info">Version ' + res.version + ' is available, but this release has no package for your system. Check the release page for other platforms.</span>';
               }
             } else if (res.updateAvailable) {
               btnCheckUpdate.dataset.action = 'install';

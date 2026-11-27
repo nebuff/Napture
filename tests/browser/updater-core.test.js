@@ -6,6 +6,7 @@ const {
   compareVersions,
   selectLatestRelease,
   selectUpdateAsset,
+  selectDownloadAsset,
   buildUpdateCheckResult
 } = require('../../napture/updater-core');
 
@@ -130,6 +131,41 @@ describe('updater-core asset selection', () => {
     expect(selectUpdateAsset(assets, { platform: 'linux', arch: 'x64' })).toBeNull();
   });
 
+  test('falls back to a real installer so manual updates are not a dead end', () => {
+    const linux = [
+      asset('napture-0.24.0-x86_64-linux.AppImage'),
+      asset('napture-0.24.0-amd64-linux.deb'),
+      asset('napture-0.24.0-x86_64-linux.rpm'),
+      asset('napture-0.24.0-x64-linux.tar.gz'),
+      asset('latest-mac.yml')
+    ];
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64' }).name)
+      .toBe('napture-0.24.0-x86_64-linux.AppImage');
+
+    const arm = [
+      asset('napture-0.24.0-x86_64-linux.AppImage'),
+      asset('napture-0.24.0-arm64-linux.AppImage')
+    ];
+    expect(selectDownloadAsset(arm, { platform: 'linux', arch: 'arm64' }).name)
+      .toBe('napture-0.24.0-arm64-linux.AppImage');
+  });
+
+  test('prefers the Windows installer over the portable build', () => {
+    const windows = [
+      asset('napture-0.24.0-x64-windows-portable.exe'),
+      asset('napture-0.24.0-x64-windows.exe'),
+      asset('napture-0.24.0-x64-windows.exe.blockmap')
+    ];
+    expect(selectDownloadAsset(windows, { platform: 'win32', arch: 'x64' }).name)
+      .toBe('napture-0.24.0-x64-windows.exe');
+  });
+
+  test('picks the macOS dmg and returns null when nothing matches the platform', () => {
+    expect(selectDownloadAsset(assets, { platform: 'darwin', arch: 'arm64' }).name)
+      .toBe('napture-0.24.0-arm64-macos.dmg');
+    expect(selectDownloadAsset([asset('latest-mac.yml')], { platform: 'linux', arch: 'x64' })).toBeNull();
+  });
+
   test('prefers a dedicated update bundle over a full app archive', () => {
     const bundleAssets = [
       asset('napture-0.24.0-x64-linux.tar.gz'),
@@ -156,6 +192,30 @@ describe('updater-core check result', () => {
     expect(result.download_url).toBeNull();
     expect(result.release_url).toContain('/releases/tag/v0.23.0');
     expect(result.release_notes).toContain('Bug fixes');
+    // The release does ship something for Windows; report it instead of nothing.
+    expect(result.installer_name).toBe('napture-0.23.0-x64-windows.exe');
+    expect(result.installer_url).toContain('napture-0.23.0-x64-windows.exe');
+  });
+
+  test('reports no installer when the release has nothing for the platform', () => {
+    const result = buildUpdateCheckResult({
+      releases: [makeRelease('0.23.0', { assets: [asset('latest-mac.yml')] })],
+      channel: 'stable',
+      currentVersion: '0.22.1',
+      platform: 'linux',
+      arch: 'x64'
+    });
+
+    expect(result.manual).toBe(true);
+    expect(result.installer_url).toBeNull();
+    expect(result.installer_name).toBeNull();
+  });
+
+  test('settings UI offers a download action instead of claiming no package exists', () => {
+    const settingsSource = fs.readFileSync(path.resolve(__dirname, '../../napture/settings-ui.js'), 'utf8');
+    expect(settingsSource).not.toContain('No automatic package for this platform');
+    expect(settingsSource).toContain("dataset.action === 'download'");
+    expect(settingsSource).toContain('naptureAPI.openExternal');
   });
 
   test('provides an absolute download url for an installable zip', () => {
