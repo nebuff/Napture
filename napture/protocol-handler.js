@@ -703,6 +703,18 @@ function buildWelcomePage() {
     console.error('Error fetching search engine setting for welcome page:', e);
   }
 
+  // The new tab page has its own search box, so it needs the snippets module
+  // inline (it runs on napture:// rather than next to renderer/index.html) and
+  // the user's snippet list embedded for .key resolution.
+  let snippetsRaw = null;
+  let snippetsCoreSource = '';
+  try {
+    snippetsRaw = getSetting('snippets', null);
+    snippetsCoreSource = fs.readFileSync(path.join(__dirname, 'renderer', 'snippets-core.js'), 'utf8');
+  } catch (e) {
+    console.error('Error preparing snippets for welcome page:', e);
+  }
+
   const engineUrls = {
     google: 'https://google.com/search',
     duckduckgo: 'https://duckduckgo.com/',
@@ -845,6 +857,10 @@ function buildWelcomePage() {
     '  </div>',
     '</main>',
     '<script>',
+    snippetsCoreSource,
+    '</script>',
+    '<script>',
+    'var snippetList = window.NaptureSnippets ? window.NaptureSnippets.parseList(' + JSON.stringify(snippetsRaw) + ') : [];',
     'var input = document.getElementById("si");',
     'var form = document.getElementById("sf");',
     'var sugBox = document.getElementById("suggestions");',
@@ -855,6 +871,15 @@ function buildWelcomePage() {
     'var isSubmitting = false;',
     'function submitQuery(q) {',
     '  if (!q || isSubmitting) return;',
+    '  var snippetTarget = window.NaptureSnippets ? window.NaptureSnippets.resolve(q, snippetList) : null;',
+    '  if (snippetTarget) {',
+    '    isSubmitting = true;',
+    '    if (sugBox) sugBox.classList.add("hidden");',
+    '    if (sc) sc.classList.add("fly-up");',
+    '    if (page) page.classList.add("exiting");',
+    '    setTimeout(function() { window.location.href = snippetTarget; }, 200);',
+    '    return;',
+    '  }',
     '  isSubmitting = true;',
     '  var targetUrl = q;',
     '  if (/^[a-zA-Z0-9+-.]+:\\/\\//.test(q)) {',
@@ -891,6 +916,12 @@ function buildWelcomePage() {
     '    sugBox.classList.add("hidden");',
     '    currentSuggestions = [];',
     '    selectedIndex = -1;',
+    '    return;',
+    '  }',
+    '  var snippetMatches = (val.charAt(0) === "." && window.NaptureSnippets) ? window.NaptureSnippets.suggestions(val, snippetList) : [];',
+    '  if (snippetMatches.length > 0) {',
+    '    currentSuggestions = snippetMatches;',
+    '    renderSuggestions();',
     '    return;',
     '  }',
     '  debounceTimer = setTimeout(function() {',

@@ -69,6 +69,21 @@ describe('Custom Protocol Handlers & Route Resolution', () => {
       expect(text).toContain('New Tab');
     });
 
+    it('wires Quick Site Snippets into the new tab page search box', async () => {
+      const res = handleCustomProtocolRequest({ url: 'napture://welcome' });
+      const text = await res.text();
+
+      expect(text).toContain('NaptureSnippets = factory()');
+      expect(text).toContain('var snippetList');
+      expect(text).toContain('NaptureSnippets.resolve(q, snippetList)');
+      expect(text).toContain('NaptureSnippets.suggestions(val, snippetList)');
+      // Snippets must win before the search/domain fallbacks.
+      const submitIndex = text.indexOf('NaptureSnippets.resolve(q, snippetList)');
+      const searchFallbackIndex = text.indexOf('targetUrl = searchBaseUrl');
+      expect(submitIndex).toBeGreaterThan(-1);
+      expect(searchFallbackIndex).toBeGreaterThan(submitIndex);
+    });
+
     it('returns text/html response for napture://settings', async () => {
       const res = handleCustomProtocolRequest({ url: 'napture://settings' });
       expect(res.headers.get('Content-Type')).toContain('text/html');

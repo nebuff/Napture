@@ -315,6 +315,21 @@ describe('Settings UI Client Script Validation', () => {
     expect(scriptCode).not.toContain("t('url_label')");
   });
 
+  it('keeps the leading dot inside the snippet key field', () => {
+    const { buildSettingsPage } = require('../../napture/settings-ui');
+    const html = buildSettingsPage({
+      snippets: JSON.stringify([{ snippet: 'yt', description: 'youtube', url: 'https://youtube.com' }])
+    });
+
+    const scriptCode = html.match(/<script>([\s\S]*?)<\/script>/)[1];
+    expect(() => new vm.Script(scriptCode)).not.toThrow();
+    // The dot is part of the field value, not a separate decorative span.
+    expect(scriptCode).toContain('snippetFieldValue(key)');
+    expect(scriptCode).toContain('function stripSnippetDots');
+    expect(scriptCode).not.toContain('snippet-dot-prefix');
+    expect(scriptCode).toContain('placeholder=".mail"');
+  });
+
   it('renders No snippets set! when snippets list is empty', () => {
     const { buildSettingsPage } = require('../../napture/settings-ui');
     const html = buildSettingsPage();

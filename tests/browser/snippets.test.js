@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const { getDefaultSettings } = require('../../napture/settings-ui');
 const i18n = require('../../napture/i18n');
-const snippets = require('../../napture/snippets-core');
+const snippets = require('../../napture/renderer/snippets-core');
 
 describe('Quick Site Snippets Suite', () => {
   describe('Default Configuration & i18n', () => {
@@ -106,6 +106,30 @@ describe('Quick Site Snippets Suite', () => {
     });
   });
 
+  describe('Legacy stored data', () => {
+    it('resolves keys saved with the first character stripped by the old editor', () => {
+      // The pre-fix settings page turned a typed key of "yt" into "t" on save.
+      expect(snippets.resolve('.yt', [{ snippet: 't', url: 'https://youtube.com' }])).toBe('https://youtube.com');
+    });
+
+    it('prefers an exact key over the legacy truncated key', () => {
+      const list = snippets.parseList([
+        { snippet: 'yt', url: 'https://youtube.com' },
+        { snippet: 't', url: 'https://example.com' }
+      ]);
+      expect(snippets.resolve('.yt', list)).toBe('https://youtube.com');
+    });
+
+    it('reads object-map and alternate field shapes', () => {
+      expect(snippets.parseList({ yt: 'youtube.com' })).toEqual([
+        { snippet: 'yt', description: '', url: 'https://youtube.com' }
+      ]);
+      expect(snippets.parseList([{ key: 'mail', target: 'gmail.com', label: 'Mail' }])).toEqual([
+        { snippet: 'mail', description: 'Mail', url: 'https://gmail.com' }
+      ]);
+    });
+  });
+
   describe('suggestions', () => {
     const list = snippets.parseList([
       { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
@@ -141,7 +165,7 @@ describe('Quick Site Snippets Suite', () => {
       const html = buildSettingsPage();
       // A single escaped dot would turn into /^./ after template interpolation and
       // silently delete the first character of every snippet key.
-      expect(html).toContain(".replace(/^\\./, '')");
+      expect(html).toContain(".replace(/^\\.+/, '')");
       expect(html).not.toContain(".replace(/^./, '')");
     });
   });
@@ -152,6 +176,8 @@ describe('Quick Site Snippets Suite', () => {
       const core = html.indexOf('src="snippets-core.js"');
       expect(core).toBeGreaterThan(-1);
       expect(core).toBeLessThan(html.indexOf('src="renderer.js"'));
+      // The tag must point at a file that really exists next to index.html.
+      expect(fs.existsSync(path.join(__dirname, '../../napture/renderer/snippets-core.js'))).toBe(true);
     });
 
     it('resolves snippets through the shared module in the address bar', () => {

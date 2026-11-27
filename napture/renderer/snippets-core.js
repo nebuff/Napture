@@ -47,21 +47,39 @@
         }
       }
     }
+    // Alternate legacy shape: { yt: "https://youtube.com", mail: { url: "..." } }
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const map = value;
+      value = Object.keys(map).map(function (key) {
+        const entry = map[key];
+        if (entry && typeof entry === 'object') {
+          return {
+            snippet: key,
+            url: entry.url != null ? entry.url : (entry.target != null ? entry.target : entry.href),
+            description: entry.description != null ? entry.description : entry.label
+          };
+        }
+        return { snippet: key, url: entry };
+      });
+    }
     if (!Array.isArray(value)) return [];
 
     const list = [];
     const seen = new Set();
     for (const item of value) {
       if (!item || typeof item !== 'object') continue;
-      const key = normalizeKey(item.snippet);
-      const url = normalizeUrl(item.url);
+      const rawKey = item.snippet != null ? item.snippet : (item.key != null ? item.key : item.shortcut);
+      const rawUrl = item.url != null ? item.url : (item.target != null ? item.target : (item.href != null ? item.href : item.link));
+      const key = normalizeKey(rawKey);
+      const url = normalizeUrl(rawUrl);
       if (!key || !url) continue;
       const lower = key.toLowerCase();
       if (seen.has(lower)) continue;
       seen.add(lower);
+      const desc = item.description != null ? item.description : item.label;
       list.push({
         snippet: key,
-        description: item.description == null ? '' : String(item.description).trim(),
+        description: desc == null ? '' : String(desc).trim(),
         url: url
       });
     }
@@ -88,13 +106,28 @@
   function resolve(input, list) {
     const snippets = Array.isArray(list) ? list : parseList(list);
     if (snippets.length === 0) return null;
-    for (const candidate of getCandidates(input)) {
+    const candidates = getCandidates(input);
+
+    for (const candidate of candidates) {
       const lower = candidate.toLowerCase();
       const match = snippets.find(function (item) {
         return normalizeKey(item.snippet).toLowerCase() === lower;
       });
       if (match) return normalizeUrl(match.url) || null;
     }
+
+    // Compatibility for snippets saved by the old settings editor, which stripped
+    // the first character of every key (".yt" was stored as "t"). Recover those by
+    // accepting a key exactly one character shorter than the typed token.
+    for (const candidate of candidates) {
+      if (candidate.length < 2) continue;
+      const truncated = candidate.slice(1).toLowerCase();
+      const legacy = snippets.find(function (item) {
+        return normalizeKey(item.snippet).toLowerCase() === truncated;
+      });
+      if (legacy) return normalizeUrl(legacy.url) || null;
+    }
+
     return null;
   }
 

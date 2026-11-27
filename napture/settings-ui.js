@@ -1335,19 +1335,10 @@ function buildSettingsPage() {
       border-color: var(--border-focus);
       box-shadow: 0 0 0 2px rgba(127, 140, 255, 0.15);
     }
-    .snippet-dot-prefix {
-      padding: 7px 0 7px 10px;
-      color: #767a8c;
-      font-family: inherit;
-      font-size: 12px;
-      font-weight: 600;
-      user-select: none;
-    }
     .snippet-prefix-wrapper input[type="text"] {
       border: none !important;
       box-shadow: none !important;
       background: transparent !important;
-      padding-left: 2px !important;
       border-radius: 0 !important;
       flex: 1;
     }
@@ -2394,10 +2385,13 @@ function buildSettingsPage() {
       currentSnippets = value
         .filter(function (item) { return item && typeof item === 'object'; })
         .map(function (item) {
+          const rawKey = item.snippet != null ? item.snippet : (item.key != null ? item.key : item.shortcut);
+          const rawUrl = item.url != null ? item.url : (item.target != null ? item.target : (item.href != null ? item.href : item.link));
+          const rawDesc = item.description != null ? item.description : item.label;
           return {
-            snippet: String(item.snippet == null ? '' : item.snippet).trim().replace(/^\\.+/, ''),
-            description: item.description == null ? '' : String(item.description),
-            url: item.url == null ? '' : String(item.url)
+            snippet: String(rawKey == null ? '' : rawKey).trim().replace(/^\\.+/, ''),
+            description: rawDesc == null ? '' : String(rawDesc),
+            url: rawUrl == null ? '' : String(rawUrl)
           };
         });
     })();
@@ -2438,6 +2432,18 @@ function buildSettingsPage() {
       persistSetting('snippets', JSON.stringify(getSavableSnippets()));
     }
 
+    // Snippet keys are stored without the leading dot, but the dot is part of
+    // how a snippet is written, so it lives inside the key field itself.
+    function stripSnippetDots(value) {
+      let key = String(value == null ? '' : value).trim();
+      while (key.charAt(0) === '.') key = key.slice(1);
+      return key;
+    }
+
+    function snippetFieldValue(key) {
+      return key ? '.' + key : '.';
+    }
+
     function renderSnippetsList() {
       const container = document.getElementById('snippets-list-container');
       if (!container) return;
@@ -2449,7 +2455,7 @@ function buildSettingsPage() {
 
       let html = '';
       currentSnippets.forEach((item, idx) => {
-        const snip = escapeHtml(item.snippet || '').replace(/^\\./, '');
+        const snip = escapeHtml(snippetFieldValue(stripSnippetDots(item.snippet)));
         const desc = escapeHtml(item.description || '');
         const url = escapeHtml(item.url || 'https://');
 
@@ -2457,8 +2463,7 @@ function buildSettingsPage() {
           '<div style="flex: 1; min-width: 130px;">' +
             '<div style="font-size: 10px; color: var(--text-muted); margin-bottom: 2px;">' + ${JSON.stringify(t('snippet_label'))} + '</div>' +
             '<div class="snippet-prefix-wrapper">' +
-              '<span class="snippet-dot-prefix">.</span>' +
-              '<input type="text" class="snippet-key-input" data-index="' + idx + '" value="' + snip + '" placeholder="mail">' +
+              '<input type="text" class="snippet-key-input" data-index="' + idx + '" value="' + snip + '" placeholder=".mail">' +
             '</div>' +
           '</div>' +
           '<div style="flex: 1.5; min-width: 160px;">' +
@@ -2481,12 +2486,12 @@ function buildSettingsPage() {
       container.querySelectorAll('.snippet-key-input').forEach(inp => {
         inp.addEventListener('input', () => {
           const idx = parseInt(inp.dataset.index, 10);
-          let cleanVal = inp.value.trim().replace(/^\\./, '');
-          if (inp.value !== cleanVal && inp.value.startsWith('.')) {
-            inp.value = cleanVal;
+          let raw = inp.value;
+          if (raw.length > 1 && raw.charAt(0) === '.' && raw.charAt(1) === '.') {
+            inp.value = snippetFieldValue(stripSnippetDots(raw));
           }
           if (currentSnippets[idx]) {
-            currentSnippets[idx].snippet = cleanVal;
+            currentSnippets[idx].snippet = stripSnippetDots(inp.value);
             saveSnippets();
           }
         });
@@ -2494,7 +2499,7 @@ function buildSettingsPage() {
           const idx = parseInt(inp.dataset.index, 10);
           if (!currentSnippets[idx]) return;
           const key = normalizeSnippetKey(inp.value);
-          inp.value = key;
+          inp.value = snippetFieldValue(key);
           currentSnippets[idx].snippet = key;
           if (!key) {
             showToast('Snippet key cannot be empty');
@@ -2571,6 +2576,7 @@ function buildSettingsPage() {
         if (rows.length > 0) {
           const lastInput = rows[rows.length - 1];
           lastInput.focus();
+          lastInput.setSelectionRange(lastInput.value.length, lastInput.value.length);
         }
       });
     }
