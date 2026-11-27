@@ -52,6 +52,11 @@ if [ "$BUILD_WIN" -eq 1 ] && ! command -v wine >/dev/null 2>&1; then
 fi
 
 cd "$REPO_ROOT"
+# electron-builder packs the NSIS and portable archives with -mx=9, which peaks
+# around 800 MB of RAM per archive and gets OOM-killed on an 8 GB machine. 6 is
+# a few percent larger and needs roughly a quarter of the memory.
+export ELECTRON_BUILDER_COMPRESSION_LEVEL="${ELECTRON_BUILDER_COMPRESSION_LEVEL:-6}"
+
 step "Building $RELEASE_TITLE on $(uname -s)"
 if [ "$BUILD_WIN" -eq 1 ]; then
   npm run dist:win

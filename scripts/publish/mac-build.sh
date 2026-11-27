@@ -67,6 +67,9 @@ if [ ! -d node_modules ]; then
   npm install
 fi
 
+# See linux-win-build.sh: keep 7-Zip below the default -mx=9 memory peak.
+export ELECTRON_BUILDER_COMPRESSION_LEVEL="${ELECTRON_BUILDER_COMPRESSION_LEVEL:-6}"
+
 step "Building macOS arm64 for $RELEASE_TITLE"
 npx electron-builder --mac --arm64 --publish never
 
