@@ -43,6 +43,8 @@ jobs:
         with:
           node-version: 22
       - run: npm ci --no-audit --no-fund
+      # rpmbuild is what electron-builder's fpm uses for the .rpm target.
+      - run: sudo apt-get update && sudo apt-get install -y rpm
       - run: npm run dist:linux
       - uses: actions/upload-artifact@v4
         with:
@@ -50,6 +52,8 @@ jobs:
           path: |
             dist/*.AppImage
             dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
             dist/*.yml
           if-no-files-found: error
           retention-days: 14

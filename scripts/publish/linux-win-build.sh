@@ -51,6 +51,21 @@ if [ "$BUILD_WIN" -eq 1 ] && ! command -v wine >/dev/null 2>&1; then
        Or build Linux only: $0 --no-linux"
 fi
 
+if [ "$BUILD_LINUX" -eq 1 ]; then
+  # deb/rpm are packed by electron-builder's bundled fpm, a self-contained ruby
+  # that still links libcrypt.so.1 (Fedora 40+ only ships it in libxcrypt-compat).
+  if ! ldconfig -p 2>/dev/null | grep 'libcrypt\.so\.1' >/dev/null; then
+    die "deb/rpm packaging needs libcrypt.so.1 for electron-builder's bundled fpm.
+       Install it with: sudo dnf install libxcrypt-compat
+       (Debian/Ubuntu: sudo apt-get install libcrypt1)"
+  fi
+  if ! command -v rpmbuild >/dev/null 2>&1; then
+    die "rpm packaging shells out to rpmbuild.
+       Install it with: sudo dnf install rpm-build
+       (Debian/Ubuntu: sudo apt-get install rpm)"
+  fi
+fi
+
 cd "$REPO_ROOT"
 # electron-builder packs the NSIS and portable archives with -mx=9, which peaks
 # around 800 MB of RAM per archive and gets OOM-killed on an 8 GB machine. 6 is
@@ -70,7 +85,8 @@ if [ "$BUILD_WIN" -eq 1 ]; then
   upload_assets "Windows" "napture-$VERSION-*-windows*.exe"
 fi
 if [ "$BUILD_LINUX" -eq 1 ]; then
-  upload_assets "Linux" "napture-$VERSION-*-linux.AppImage" "napture-$VERSION-*-linux.tar.gz"
+  upload_assets "Linux" "napture-$VERSION-*-linux.AppImage" "napture-$VERSION-*-linux.tar.gz" \
+    "napture-$VERSION-*-linux.deb" "napture-$VERSION-*-linux.rpm"
 fi
 print_release_link
 

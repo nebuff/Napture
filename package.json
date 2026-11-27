@@ -28,6 +28,7 @@
     "privacy"
   ],
   "author": "Napture Team",
+  "homepage": "https://github.com/nebuff/Napture",
   "license": "MIT",
   "devDependencies": {
     "electron": "46.0.0-alpha.13",
@@ -149,6 +150,7 @@
       "synopsis": "Lightweight, cross-platform Chromium Forked web browser",
       "description": "Lightweight, cross-platform Chromium Forked web browser",
       "category": "Network;WebBrowser",
+      "maintainer": "Napture Team",
       "desktop": {
         "entry": {
           "StartupWMClass": "Napture"
@@ -164,6 +166,20 @@
         },
         {
           "target": "tar.gz",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        },
+        {
+          "target": "rpm",
           "arch": [
             "x64",
             "arm64"
