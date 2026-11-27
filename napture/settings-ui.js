@@ -171,7 +171,10 @@ function getDefaultSettings() {
     ]),
 
     // 10. Quick Site Snippets
-    snippets: JSON.stringify([])
+    snippets: JSON.stringify([]),
+
+    // 11. Software Updates
+    updateChannel: 'stable'
   };
 }
 
@@ -1295,137 +1298,6 @@ function buildSettingsPage() {
     .update-status-badge.info { color: #818cf8; }
     .update-status-badge.error { color: #f87171; }
 
-    /* Sync Section Styles */
-    .sync-status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 11.5px;
-      font-weight: 600;
-      letter-spacing: 0.3px;
-    }
-    .sync-status-badge.active {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-    .sync-status-badge.inactive {
-      background: rgba(255, 255, 255, 0.05);
-      color: var(--text-muted);
-      border: 1px solid var(--border-color);
-    }
-    .sync-status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-    .sync-code-container {
-      background: #0f1015;
-      border: 1px dashed rgba(127, 140, 255, 0.4);
-      border-radius: 8px;
-      padding: 16px;
-      text-align: center;
-      margin: 12px 20px;
-      animation: sectionFadeIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    }
-    .sync-code-text {
-      font-family: 'JetBrains Mono', 'Consolas', monospace;
-      font-size: 24px;
-      font-weight: 700;
-      letter-spacing: 3px;
-      color: var(--accent);
-      user-select: all;
-    }
-    .sync-code-timer {
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-top: 6px;
-    }
-    .device-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      padding: 14px 20px 16px 20px;
-    }
-    .device-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 10px 14px;
-      background: var(--bg-input);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
-    }
-    .device-item:hover {
-      background: rgba(255, 255, 255, 0.035);
-      border-color: rgba(127, 140, 255, 0.28);
-      transform: translateX(2px);
-    }
-    .device-meta {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-    .device-icon {
-      width: 32px;
-      height: 32px;
-      border-radius: 6px;
-      background: rgba(127, 140, 255, 0.1);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--accent);
-    }
-    .device-name {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-    .device-sub {
-      font-size: 11.5px;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-    .activity-status {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 11.5px;
-      transition: color 0.3s ease;
-    }
-    .activity-status.online {
-      color: #34d399;
-    }
-    .activity-status.offline {
-      color: var(--text-muted);
-    }
-    .activity-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 50%;
-      background-color: currentColor;
-      display: inline-block;
-      flex-shrink: 0;
-      transition: background-color 0.3s ease, box-shadow 0.3s ease;
-    }
-    .activity-status.online .activity-dot {
-      background-color: #10b981;
-    }
-    .device-tag-this {
-      font-size: 10.5px;
-      padding: 2px 6px;
-      background: rgba(127, 140, 255, 0.2);
-      color: var(--accent);
-      border-radius: 4px;
-      margin-left: 6px;
-    }
-
     /* Quick Site Snippets Styles */
     .snippet-prefix-wrapper {
       display: flex;
@@ -1571,12 +1443,6 @@ function buildSettingsPage() {
           <line x1="12" y1="15" x2="12" y2="3"></line>
         </svg>
         <span>${t('import')}</span>
-      </li>
-      <li class="nav-item" data-target="sync">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
-        </svg>
-        <span>${t('nav_sync')}</span>
       </li>
       <li class="nav-item" data-target="search">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -1800,23 +1666,6 @@ function buildSettingsPage() {
                 <div class="row-desc">Import bookmarks and browsing history from Firefox</div>
               </div>
               <button class="btn btn-primary btn-import-target" data-browser="firefox">Import from Firefox</button>
-            </div>
-          </div>
-        </div>
-
-        <!-- SECTION: Zero-Knowledge Sync -->
-        <div class="section" id="sec-sync">
-          <div class="section-header">
-            <h2 class="section-title">${t('nav_sync')}</h2>
-          </div>
-          <div id="sync-view-container">
-            <div class="card-group">
-              <div class="card-row">
-                <div class="row-info">
-                  <div class="row-label">Loading Sync Engine...</div>
-                  <div class="row-desc">Checking encryption keys and linked devices</div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
@@ -2122,6 +1971,16 @@ function buildSettingsPage() {
               <div style="width: 100%; height: 6px; background: rgba(255, 255, 255, 0.05); border-radius: 3px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.08);">
                 <div id="update-progress-bar-inner" style="width: 0%; height: 100%; background: var(--accent); transition: width 0.2s ease;"></div>
               </div>
+            </div>
+            <div class="card-row" style="border-top: 1px solid var(--border-color);">
+              <div class="row-info">
+                <div class="row-label">${t('update_channel')}</div>
+                <div class="row-desc" id="update-channel-desc">${t('update_channel_desc')}</div>
+              </div>
+              <select id="setting-updateChannel">
+                <option value="stable" ${settings.updateChannel === 'beta' ? '' : 'selected'}>Stable</option>
+                <option value="beta" ${settings.updateChannel === 'beta' ? 'selected' : ''}>Beta</option>
+              </select>
             </div>
           </div>
 
@@ -2438,7 +2297,8 @@ function buildSettingsPage() {
       'setting-language': 'language',
       'setting-memorySaver': 'memorySaver',
       'setting-memoryTarget': 'memoryTarget',
-      'setting-hardwareAcceleration': 'hardwareAcceleration'
+      'setting-hardwareAcceleration': 'hardwareAcceleration',
+      'setting-updateChannel': 'updateChannel'
     };
 
     Object.keys(settingMap).forEach(id => {
@@ -2454,6 +2314,19 @@ function buildSettingsPage() {
         if (key === 'memoryTarget') {
           const display = document.getElementById('memoryTargetDisplay');
           if (display) display.textContent = value + ' MB';
+        }
+        if (key === 'updateChannel') {
+          // Channel changes invalidate any update already found, so reset the card.
+          const checkBtn = document.getElementById('btn-check-update');
+          const checkBtnText = document.getElementById('btn-check-update-text');
+          const statusEl = document.getElementById('update-card-status');
+          if (checkBtn) {
+            delete checkBtn.dataset.action;
+            checkBtn.classList.remove('btn-success');
+            checkBtn.classList.add('btn-primary');
+          }
+          if (checkBtnText) checkBtnText.textContent = 'Check for Updates';
+          if (statusEl) statusEl.textContent = 'Update channel set to ' + (value === 'beta' ? 'Beta' : 'Stable') + '.';
         }
         if (key === 'language') {
           Promise.resolve(persistSetting(key, value)).then(() => {
@@ -2820,7 +2693,15 @@ function buildSettingsPage() {
             btnCheckUpdate.classList.remove('checking');
             btnCheckUpdate.disabled = false;
             
-            if (res.updateAvailable) {
+            if (res.updateAvailable && res.manual) {
+              delete btnCheckUpdate.dataset.action;
+              btnCheckUpdate.classList.remove('btn-success');
+              btnCheckUpdate.classList.add('btn-primary');
+              if (btnCheckUpdateText) btnCheckUpdateText.textContent = 'Check Again';
+              if (updateCardStatus) {
+                updateCardStatus.innerHTML = '<span class="update-status-badge info">Version ' + res.version + ' is available. No automatic package for this platform &mdash; get it from the <a href="' + res.release_url + '" style="color: var(--accent);">GitHub release page</a>.</span>';
+              }
+            } else if (res.updateAvailable) {
               btnCheckUpdate.dataset.action = 'install';
               if (btnCheckUpdateText) btnCheckUpdateText.textContent = 'Install & Restart';
               btnCheckUpdate.classList.remove('btn-primary');
@@ -3681,485 +3562,19 @@ function buildSettingsPage() {
       });
     }
 
-    // --- Napture Zero-Knowledge Sync UI Controller ---
-    let currentSyncStatus = null;
-    let pairingTimerInterval = null;
-
-    async function loadSyncUI() {
-      const container = document.getElementById('sync-view-container');
-      if (!container) return;
-      if (!window.naptureAPI || !window.naptureAPI.getSyncStatus) {
-        setTimeout(loadSyncUI, 100);
-        return;
-      }
-
-      try {
-        currentSyncStatus = await window.naptureAPI.getSyncStatus();
-        renderSyncUI(currentSyncStatus);
-      } catch (err) {
-        container.innerHTML = \`
-          <div class="card-group">
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Sync Service Offline</div>
-                <div class="row-desc">\${err.message || 'Could not connect to sync service.'}</div>
-              </div>
-              <button class="btn btn-primary" id="btn-sync-retry">Retry Connection</button>
-            </div>
-          </div>
-        \`;
-        document.getElementById('btn-sync-retry')?.addEventListener('click', () => {
-          container.innerHTML = \`
-            <div class="card-group">
-              <div class="card-row">
-                <div class="row-info">
-                  <div class="row-label">Connecting to Sync Engine...</div>
-                  <div class="row-desc">Checking encryption keys and linked devices</div>
-                </div>
-              </div>
-            </div>
-          \`;
-          loadSyncUI();
-        });
-      }
-    }
-
-    function renderSyncUI(status) {
-      const container = document.getElementById('sync-view-container');
-      if (!container) return;
-
-      if (!status.isLinked) {
-        // UNLINKED STATE
-        container.innerHTML = \`
-          <div class="card-group">
-            <div class="card-row" style="flex-direction: column; align-items: flex-start; gap: 8px;">
-              <div class="row-label" style="font-size: 15px; font-weight: 600;">Link Devices</div>
-              <div class="row-desc" style="max-width: 600px; line-height: 1.5;">
-                Link all your devices together to share the same data
-              </div>
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Device Name</div>
-                <div class="row-desc">How this device will appear to other synced devices</div>
-              </div>
-              <input type="text" id="sync-device-name-input" class="text-input" value="\${escapeHtml(status.deviceName || '')}" style="width: 220px; padding: 6px 10px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 6px;">
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Start a New Sync Group</div>
-                <div class="row-desc">Create an encrypted sync cluster and make this device the primary node</div>
-              </div>
-              <button class="btn btn-primary" id="btn-sync-init">Start Sync Group</button>
-            </div>
-            <div class="card-row" style="flex-direction: column; align-items: stretch; gap: 12px;">
-              <div class="row-info">
-                <div class="row-label">Link with Existing Device</div>
-                <div class="row-desc">Enter the 8-character pairing code generated on your other device</div>
-              </div>
-              <div style="display: flex; gap: 10px;">
-                <input type="text" id="sync-code-input" placeholder="NAPT-XXXX-XXXX" maxlength="14" style="flex: 1; text-transform: uppercase; font-family: monospace; font-weight: 600; letter-spacing: 1.5px; padding: 8px 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--accent); border-radius: 6px;">
-                <button class="btn btn-primary" id="btn-sync-claim">Link Device</button>
-              </div>
-            </div>
-          </div>
-        \`;
-
-        document.getElementById('btn-sync-init')?.addEventListener('click', async () => {
-          const btn = document.getElementById('btn-sync-init');
-          const devName = document.getElementById('sync-device-name-input')?.value;
-          btn.disabled = true;
-          btn.textContent = 'Initializing...';
-          try {
-            const newStatus = await window.naptureAPI.initSyncGroup(devName);
-            showToast('Sync group initialized successfully!');
-            renderSyncUI(newStatus);
-          } catch (e) {
-            btn.disabled = false;
-            btn.textContent = 'Start Sync Group';
-            showToast('Failed to initialize: ' + e.message);
-          }
-        });
-
-        document.getElementById('btn-sync-claim')?.addEventListener('click', async () => {
-          const btn = document.getElementById('btn-sync-claim');
-          const code = document.getElementById('sync-code-input')?.value;
-          const devName = document.getElementById('sync-device-name-input')?.value;
-          if (!code || code.trim().length < 8) {
-            showToast('Please enter a valid pairing code');
-            return;
-          }
-          btn.disabled = true;
-          btn.textContent = 'Linking...';
-          try {
-            const newStatus = await window.naptureAPI.joinSyncGroup(code, devName);
-            showToast('Device linked and synced successfully!');
-            renderSyncUI(newStatus);
-          } catch (e) {
-            btn.disabled = false;
-            btn.textContent = 'Link Device';
-            showToast(e.message || 'Invalid or expired code');
-          }
-        });
-
-      } else {
-        // LINKED STATE
-        const devicesListHtml = (status.connectedDevices || []).map(d => {
-          const isThisDevice = d.device_id === status.deviceId;
-          const isOnline = isThisDevice || !!d.isOnline;
-          const platform = (d.platform || '').toLowerCase();
-          let iconSvg = '<rect x="4" y="4" width="16" height="16" rx="2"></rect>';
-          if (platform.includes('win')) {
-            iconSvg = '<path d="M3 4l8-1v8H3V4zm9-1.2l9-1.3v9.5h-9V1.8zM3 13h8v8l-8-1v-7zm9 0h9v9.5l-9-1.3V13z"/>';
-          } else if (platform.includes('mac') || platform.includes('darwin')) {
-            iconSvg = '<path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/>';
-          } else if (platform.includes('linux')) {
-            iconSvg = '<circle cx="12" cy="12" r="10"/>';
-          }
-
-          const activityText = isOnline ? 'Active now' : formatTimeAgo(d.last_active);
-          const statusClass = isOnline ? 'online' : 'offline';
-
-          return \`
-            <div class="device-item" data-device-id="\${d.device_id}" data-is-this="\${isThisDevice}" data-is-online="\${isOnline}" data-last-active="\${d.last_active || 0}">
-              <div class="device-meta">
-                <div class="device-icon">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    \${iconSvg}
-                  </svg>
-                </div>
-                <div>
-                  <div class="device-name" style="display: flex; align-items: center; gap: 6px;">
-                    <span class="device-name-text" id="dev-name-text-\${d.device_id}">\${escapeHtml(d.device_name)}</span>
-                    <input type="text" class="device-name-input" id="dev-name-input-\${d.device_id}" value="\${escapeHtml(d.device_name)}" style="display: none; padding: 2px 6px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; width: 140px;">
-                    <button class="btn-edit-dev-name" data-id="\${d.device_id}" title="Rename Device" style="background: none; border: none; cursor: pointer; padding: 2px; color: var(--text-muted); display: inline-flex; align-items: center;">
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
-                    </button>
-                    <button class="btn-save-dev-name" data-id="\${d.device_id}" title="Save" style="display: none; background: none; border: none; cursor: pointer; padding: 2px; color: var(--accent); align-items: center;">
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                    </button>
-                    \${isThisDevice ? '<span class="device-tag-this">This Device</span>' : ''}
-                  </div>
-                  <div class="device-sub" id="dev-sub-\${d.device_id}">
-                    <span class="activity-status \${statusClass}">
-                      <span class="activity-dot"></span>
-                      <span class="activity-text">\${activityText}</span>
-                    </span>
-                  </div>
-                </div>
-              </div>
-              \${!isThisDevice ? \`<button class="btn btn-secondary btn-unlink-device" data-id="\${d.device_id}" style="padding: 4px 10px; font-size: 11.5px; color: #f87171;">Unlink</button>\` : ''}
-            </div>
-          \`;
-        }).join('');
-
-        container.innerHTML = \`
-          <!-- Status Header Card -->
-          <div class="card-group">
-            <div class="card-row">
-              <div class="row-info">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <span class="row-label">Sync Status</span>
-                  <span style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">\${status.isLinked ? 'Updated' : 'Offline'}</span>
-                </div>
-              </div>
-              <div style="display: flex; gap: 8px;">
-                <button class="btn btn-primary" id="btn-sync-now">Sync Now</button>
-                <button class="btn btn-secondary" id="btn-sync-leave" style="color: var(--danger);">Leave Group</button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Pairing Code Card -->
-          <div class="card-group">
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Link Another Device</div>
-                <div class="row-desc">Generate a one-time 10-minute pairing code to connect another laptop or desktop (up to 5 devices)</div>
-              </div>
-              <button class="btn btn-primary" id="btn-generate-code">Get Pairing Code</button>
-            </div>
-            <div id="pairing-code-display-area" style="display: none;"></div>
-          </div>
-
-          <!-- Sync Items Toggles -->
-          <div class="card-group">
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Bookmarks & Structure</div>
-                <div class="row-desc">Synchronize bookmark trees, folders, and custom positions</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="sync-opt-bookmarks" \${status.syncOptions?.syncBookmarks ? 'checked' : ''}><span class="slider"></span></label>
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Pinned Tabs & Shortcuts</div>
-                <div class="row-desc">Synchronize your pinned tabs and persistent quick-access sites</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="sync-opt-pinned" \${status.syncOptions?.syncPinnedTabs !== false ? 'checked' : ''}><span class="slider"></span></label>
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Browsing History</div>
-                <div class="row-desc">Synchronize visited pages, visit timestamps, and page titles</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="sync-opt-history" \${status.syncOptions?.syncHistory ? 'checked' : ''}><span class="slider"></span></label>
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Session Cookies</div>
-                <div class="row-desc">Synchronize login sessions securely across trusted devices</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="sync-opt-cookies" \${status.syncOptions?.syncCookies !== false ? 'checked' : ''}><span class="slider"></span></label>
-            </div>
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Browser Settings & Preferences</div>
-                <div class="row-desc">Synchronize search engine, themes, privacy options, and customized settings</div>
-              </div>
-              <label class="switch"><input type="checkbox" id="sync-opt-settings" \${status.syncOptions?.syncSettings !== false ? 'checked' : ''}><span class="slider"></span></label>
-            </div>
-          </div>
-
-          <!-- Connected Devices List -->
-          <div class="card-group">
-            <div class="card-row">
-              <div class="row-info">
-                <div class="row-label">Connected Devices (\${(status.connectedDevices || []).length} / 5)</div>
-                <div class="row-desc">All devices currently part of your group</div>
-              </div>
-            </div>
-            <div class="device-list">
-              \${devicesListHtml || '<div style="color: var(--text-muted); font-size: 12px; padding: 10px 0;">No other devices connected yet.</div>'}
-            </div>
-          </div>
-        \`;
-
-        // Bind Option Toggles
-        [
-          { id: 'bookmarks', key: 'syncBookmarks', label: 'bookmarks' },
-          { id: 'pinned', key: 'syncPinnedTabs', label: 'pinned tabs' },
-          { id: 'history', key: 'syncHistory', label: 'history' },
-          { id: 'cookies', key: 'syncCookies', label: 'cookies' },
-          { id: 'settings', key: 'syncSettings', label: 'settings' }
-        ].forEach(({ id, key, label }) => {
-          document.getElementById(\`sync-opt-\${id}\`)?.addEventListener('change', (e) => {
-            window.naptureAPI.setSyncOption({ [key]: e.target.checked });
-            showToast(\`Sync \${label} \${e.target.checked ? 'enabled' : 'disabled'}\`);
-          });
-        });
-
-        // Bind Sync Now
-        document.getElementById('btn-sync-now')?.addEventListener('click', async () => {
-          const btn = document.getElementById('btn-sync-now');
-          btn.disabled = true;
-          btn.textContent = 'Syncing...';
-          try {
-            const res = await window.naptureAPI.syncNow();
-            if (res && res.synced === false) {
-              throw new Error(res.error || res.reason || 'Unknown error during sync');
-            }
-            showToast('All items synchronized successfully!');
-            await loadSyncUI();
-          } catch (e) {
-            showToast('Sync error: ' + e.message);
-          } finally {
-            btn.disabled = false;
-            btn.textContent = 'Sync Now';
-          }
-        });
-
-        // Bind Leave Group
-        document.getElementById('btn-sync-leave')?.addEventListener('click', async () => {
-          if (confirm('Are you sure you want to disconnect this device from the sync group?')) {
-            await window.naptureAPI.leaveSyncGroup();
-            showToast('Disconnected from sync group');
-            await loadSyncUI();
-          }
-        });
-
-        // Bind Generate Pairing Code
-        document.getElementById('btn-generate-code')?.addEventListener('click', async () => {
-          const btn = document.getElementById('btn-generate-code');
-          const area = document.getElementById('pairing-code-display-area');
-          btn.disabled = true;
-          btn.textContent = 'Generating...';
-
-          try {
-            const res = await window.naptureAPI.generatePairingCode();
-            area.style.display = 'block';
-            let secondsLeft = Math.floor((res.expiresAt - Date.now()) / 1000);
-
-            area.innerHTML = \`
-              <div class="sync-code-container" style="position: relative;">
-                <button id="btn-close-sync-code" style="position: absolute; top: 10px; right: 12px; background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px; display: flex; align-items: center; justify-content: center;" title="Close">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-                </button>
-                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Enter this code on your other device:</div>
-                <div class="sync-code-text" id="sync-code-val">\${res.code}</div>
-                <div class="sync-code-timer" id="sync-code-timer-text">Code expires in 10:00</div>
-                <button class="btn btn-secondary" id="btn-copy-sync-code" style="margin-top: 10px; padding: 4px 14px; font-size: 12px;">Copy Code</button>
-              </div>
-            \`;
-
-            document.getElementById('btn-close-sync-code')?.addEventListener('click', () => {
-              if (pairingTimerInterval) clearInterval(pairingTimerInterval);
-              area.style.display = 'none';
-              btn.disabled = false;
-              btn.textContent = 'Get Pairing Code';
-            });
-
-            document.getElementById('btn-copy-sync-code')?.addEventListener('click', () => {
-              navigator.clipboard.writeText(res.code);
-              showToast('Pairing code copied to clipboard!');
-            });
-
-            if (pairingTimerInterval) clearInterval(pairingTimerInterval);
-            pairingTimerInterval = setInterval(() => {
-              secondsLeft--;
-              const timerEl = document.getElementById('sync-code-timer-text');
-              if (secondsLeft <= 0) {
-                clearInterval(pairingTimerInterval);
-                if (timerEl) timerEl.textContent = 'Code expired. Please generate a new one.';
-              } else if (timerEl) {
-                const mins = Math.floor(secondsLeft / 60);
-                const secs = secondsLeft % 60;
-                timerEl.textContent = \`Code expires in \${mins}:\${secs < 10 ? '0' : ''}\${secs}\`;
-              }
-            }, 1000);
-          } catch (e) {
-            showToast('Failed to generate code: ' + e.message);
-          } finally {
-            btn.disabled = false;
-            btn.textContent = 'Get Pairing Code';
-          }
-        });
-
-        // Bind Device Inline Rename
-        document.querySelectorAll('.btn-edit-dev-name').forEach(btn => {
-          btn.addEventListener('click', () => {
-            const devId = btn.dataset.id;
-            const textEl = document.getElementById(\`dev-name-text-\${devId}\`);
-            const inputEl = document.getElementById(\`dev-name-input-\${devId}\`);
-            const saveBtn = document.querySelector(\`.btn-save-dev-name[data-id="\${devId}"]\`);
-
-            if (textEl && inputEl && saveBtn) {
-              textEl.style.display = 'none';
-              btn.style.display = 'none';
-              inputEl.style.display = 'inline-block';
-              saveBtn.style.display = 'inline-flex';
-              inputEl.focus();
-              inputEl.select();
-
-              const saveName = async () => {
-                const newName = inputEl.value.trim();
-                if (newName && newName !== textEl.textContent) {
-                  try {
-                    await window.naptureAPI.renameSyncDevice(devId, newName);
-                    showToast(\`Device renamed to \${newName}\`);
-                    await loadSyncUI();
-                  } catch (err) {
-                    showToast('Failed to rename: ' + err.message);
-                  }
-                } else {
-                  textEl.style.display = 'inline';
-                  btn.style.display = 'inline-flex';
-                  inputEl.style.display = 'none';
-                  saveBtn.style.display = 'none';
-                }
-              };
-
-              saveBtn.onclick = saveName;
-              inputEl.onkeydown = (e) => {
-                if (e.key === 'Enter') saveName();
-                else if (e.key === 'Escape') {
-                  inputEl.value = textEl.textContent;
-                  textEl.style.display = 'inline';
-                  btn.style.display = 'inline-flex';
-                  inputEl.style.display = 'none';
-                  saveBtn.style.display = 'none';
-                }
-              };
-            }
-          });
-        });
-
-        // Bind Unlink Device buttons
-        document.querySelectorAll('.btn-unlink-device').forEach(b => {
-          b.addEventListener('click', async () => {
-            const devId = b.dataset.id;
-            if (confirm('Unlink this device from the sync cluster?')) {
-              await window.naptureAPI.unlinkDevice(devId);
-              showToast('Device unlinked');
-              await loadSyncUI();
-            }
-          });
-        });
-      }
-    }
-
-    function formatTimeAgo(timestamp) {
-      if (!timestamp) return 'Never active';
-      const diff = Date.now() - timestamp;
-      if (diff < 45000) return 'Active just now';
-      if (diff < 3600000) return \`Active \${Math.floor(diff / 60000)}m ago\`;
-      if (diff < 86400000) return \`Active \${Math.floor(diff / 3600000)}h ago\`;
-      if (diff < 172800000) return 'Active yesterday';
-      return \`Active \${Math.floor(diff / 86400000)}d ago\`;
-    }
-
-    function updateAllDeviceActivityDisplays() {
-      const items = document.querySelectorAll('.device-item');
-      items.forEach(item => {
-        const isThis = item.dataset.isThis === 'true';
-        const isOnline = item.dataset.isOnline === 'true';
-        const lastActive = parseInt(item.dataset.lastActive || '0', 10);
-        const isCurrentlyActive = isThis || isOnline;
-        const text = isCurrentlyActive ? 'Active now' : formatTimeAgo(lastActive);
-
-        const statusSpan = item.querySelector('.activity-status');
-        const textSpan = item.querySelector('.activity-text');
-        if (statusSpan && textSpan) {
-          statusSpan.className = \`activity-status \${isCurrentlyActive ? 'online' : 'offline'}\`;
-          if (textSpan.textContent !== text) {
-            textSpan.textContent = text;
-          }
-        }
-      });
-    }
-
-    let liveActivityTimer = null;
-    if (!liveActivityTimer) {
-      liveActivityTimer = setInterval(updateAllDeviceActivityDisplays, 5000);
-    }
-
-    // Auto-update Sync UI when devices join, leave, rename, group changes, or presence updates in real-time
+    // Live-apply settings that arrive from an import
     if (window.naptureAPI && window.naptureAPI.onBrowserDataImported) {
-      window.naptureAPI.onBrowserDataImported(async (data) => {
-        if (!data) return;
-        if (data.devicePresence) {
-          const { deviceId, isOnline, lastActive } = data.devicePresence;
-          const item = document.querySelector(\`.device-item[data-device-id="\${deviceId}"]\`);
-          if (item) {
-            item.dataset.isOnline = isOnline ? 'true' : 'false';
-            if (lastActive) item.dataset.lastActive = String(lastActive);
-            updateAllDeviceActivityDisplays();
-          } else {
-            await loadSyncUI();
-          }
-        } else if (data.importedSettings) {
-          for (const [key, val] of Object.entries(data.importedSettings)) {
-            const el = document.getElementById(\`setting-\${key}\`);
-            if (el) {
-              if (el.type === 'checkbox') {
-                el.checked = Boolean(val);
-              } else {
-                el.value = String(val);
-              }
+      window.naptureAPI.onBrowserDataImported((data) => {
+        if (!data || !data.importedSettings) return;
+        for (const [key, val] of Object.entries(data.importedSettings)) {
+          const el = document.getElementById('setting-' + key);
+          if (el) {
+            if (el.type === 'checkbox') {
+              el.checked = Boolean(val);
+            } else {
+              el.value = String(val);
             }
           }
-        } else if (data.deviceJoined || data.deviceUnlinked || data.deviceRenamed || data.groupDisbanded) {
-          await loadSyncUI();
         }
       });
     }
@@ -4174,7 +3589,6 @@ function buildSettingsPage() {
           for (const [k, v] of Object.entries(val)) {
             applyLiveSettingUpdate(k, v);
           }
-          loadSyncUI();
           return;
         }
 
@@ -4432,8 +3846,7 @@ function buildSettingsPage() {
     });
     ` : ''}
 
-    // Automatically load Sync & Protocols UI immediately on settings page initialization
-    loadSyncUI();
+    // Automatically load Protocols UI immediately on settings page initialization
     ${neSupported ? `
     loadProtocolsUI();
 
@@ -4445,14 +3858,6 @@ function buildSettingsPage() {
       loadProtocolsUI();
     }
     ` : ''}
-
-    document.querySelector('.nav-item[data-target="sync"]')?.addEventListener('click', () => {
-      loadSyncUI();
-    });
-
-    if (window.location.hash === '#sync') {
-      loadSyncUI();
-    }
 
     if (window.location.hash && window.location.hash.includes('customize=true')) {
       const tbItem = document.querySelector('.nav-item[data-target="toolbar"]');

@@ -6611,7 +6611,11 @@ const { spawn } = require('child_process');
 let latestUpdateInfo = null;
 let updaterWindow = null;
 let isUpdating = false;
-const UPDATER_URL = 'https://updates.nebuff.xyz'; 
+const {
+  GITHUB_RELEASES_URL,
+  normalizeChannel,
+  buildUpdateCheckResult
+} = require('./updater-core');
 
 let getUpdaterHtml;
 try {
@@ -6622,39 +6626,70 @@ try {
 }
 
 
-ipcMain.handle('check-for-updates', async () => {
-  return new Promise((resolve) => {
-    const osName = process.platform === 'win32' ? 'Win' : (process.platform === 'darwin' ? 'Mac' : 'Linux');
-    const arch = process.arch.includes('arm') ? 'arm' : 'x86';
-    const currentVersion = app.getVersion();
-
-    const url = `${UPDATER_URL}/api/v1/check?os=${osName}&arch=${arch}&version=${currentVersion}`;
-    
-    const reqProto = url.startsWith('https') ? https : http;
-    reqProto.get(url, (res) => {
+function fetchGitHubReleases() {
+  return new Promise((resolve, reject) => {
+    const req = https.get(GITHUB_RELEASES_URL, {
+      headers: {
+        'User-Agent': `Napture/${app.getVersion()} (+https://github.com/nebuff/Napture)`,
+        'Accept': 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28'
+      }
+    }, (res) => {
       let data = '';
-      res.on('data', chunk => { data += chunk; });
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
+        if (res.statusCode === 403 || res.statusCode === 429) {
+          return reject(new Error('GitHub API rate limit reached. Try again later.'));
+        }
+        if (res.statusCode !== 200) {
+          return reject(new Error(`GitHub release API returned HTTP ${res.statusCode}`));
+        }
         try {
-          const result = JSON.parse(data);
-          if (result.updateAvailable) {
-            latestUpdateInfo = result;
-            latestUpdateInfo.osName = osName;
-            latestUpdateInfo.arch = arch;
+          const parsed = JSON.parse(data);
+          if (!Array.isArray(parsed)) {
+            return reject(new Error(parsed && parsed.message ? `GitHub: ${parsed.message}` : 'Unexpected response from GitHub'));
           }
-          resolve(result);
+          resolve(parsed);
         } catch (e) {
-          resolve({ error: 'Invalid response from update server' });
+          reject(new Error('Invalid response from GitHub release API'));
         }
       });
-    }).on('error', (err) => {
-      resolve({ error: err.message });
+    });
+
+    req.on('error', (err) => reject(err));
+    req.setTimeout(15000, () => {
+      req.destroy(new Error('Timed out contacting GitHub'));
     });
   });
+}
+
+ipcMain.handle('check-for-updates', async () => {
+  const channel = normalizeChannel(getSetting('updateChannel', 'stable'));
+  const currentVersion = app.getVersion();
+
+  try {
+    const releases = await fetchGitHubReleases();
+    const result = buildUpdateCheckResult({
+      releases,
+      channel,
+      currentVersion,
+      platform: process.platform,
+      arch: process.arch
+    });
+
+    latestUpdateInfo = result.updateAvailable ? { ...result, currentVersion } : null;
+    return { ...result, currentVersion };
+  } catch (err) {
+    return { error: err.message, channel, currentVersion };
+  }
 });
 
 ipcMain.handle('install-update', async () => {
   if (!latestUpdateInfo) throw new Error("No update information available. Check for updates first.");
+  if (!latestUpdateInfo.download_url) {
+    throw new Error(`Version ${latestUpdateInfo.version} has no automatic update package for this platform. Download it from ${latestUpdateInfo.release_url || 'https://github.com/nebuff/Napture/releases'}.`);
+  }
   
   isUpdating = true;
 
@@ -6727,11 +6762,7 @@ ipcMain.handle('install-update', async () => {
   }
 
   return new Promise((resolve, reject) => {
-    let downloadPath = latestUpdateInfo.download_url || '';
-    if (downloadPath.endsWith('.tar.gz')) {
-      downloadPath = downloadPath.replace(/\.tar\.gz$/, '.zip');
-    }
-    const url = downloadPath.startsWith('http') ? downloadPath : `${UPDATER_URL}${downloadPath}`;
+    const url = latestUpdateInfo.download_url;
     
     const tempDir = app.getPath('temp');
     const zipPath = path.join(tempDir, 'napture-update.zip');

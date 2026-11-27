@@ -150,7 +150,7 @@
       "synopsis": "Lightweight, cross-platform Chromium Forked web browser",
       "description": "Lightweight, cross-platform Chromium Forked web browser",
       "category": "Network;WebBrowser",
-      "maintainer": "Napture Team",
+      "maintainer": "Nebuff <nebuff@proton.me>",
       "desktop": {
         "entry": {
           "StartupWMClass": "Napture"
@@ -192,6 +192,10 @@
         "text/html"
       ],
       "artifactName": "napture-${version}-${arch}-linux.${ext}"
+    },
+    "deb": {
+      "packageCategory": "web",
+      "priority": "optional"
     },
     "flatpak": {
       "branch": "stable",

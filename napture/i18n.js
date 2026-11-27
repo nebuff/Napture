@@ -156,7 +156,7 @@ const TRANSLATIONS = {
     license: 'License',
     license_desc: 'Licensed under MIT Open Source',
     update_channel: 'Update Channel',
-    update_channel_desc: 'Stable Rolling Release',
+    update_channel_desc: 'Stable releases only, or Beta which also picks up newer stable releases',
     check_updates_btn: 'Check for Updates',
 
     // Header & Main Chrome
@@ -345,7 +345,7 @@ const TRANSLATIONS = {
     license: 'Licence',
     license_desc: 'Licenced under MIT Open Source',
     update_channel: 'Update Channel',
-    update_channel_desc: 'Stable Rolling Release',
+    update_channel_desc: 'Stable releases only, or Beta which also picks up newer stable releases',
     check_updates_btn: 'Check for Updates',
 
     // Header & Main Chrome
@@ -534,7 +534,7 @@ const TRANSLATIONS = {
     license: 'Wicense',
     license_desc: 'Wicensed undew MIT Open Souwce',
     update_channel: 'UwUpdate Channyew',
-    update_channel_desc: 'Stabwe Wowwing Wewease',
+    update_channel_desc: 'Stabwe weweases onwy, ow Beta which awso picks up newew stabwe weweases',
     check_updates_btn: '*blushes* C-Can I check fow updates automaticawwy?',
 
     // Header & Main Chrome
