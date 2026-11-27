@@ -1119,7 +1119,8 @@ if (!gotTheLock) {
 }
 
 const { registerCustomProtocols, setupProtocolHandlers } = require('./protocol-handler');
-const { buildSettingsPage } = require('./settings-ui');
+const { buildSettingsPage, DEFAULT_TOOLBAR_LAYOUT } = require('./settings-ui');
+const extensionHost = require('./extensions');
 const syncEngine = require('./db/sync-engine');
 
 // Enforce hardware acceleration toggle before app ready
@@ -4196,6 +4197,7 @@ ipcMain.on('open-about-window', () => {
 });
 
 let settingsWindow = null;
+let adblockCustomFilterReloader = null;
 
 function getSettingsHtml() {
   return buildSettingsPage();
@@ -4205,7 +4207,9 @@ function openSettingsWindow(options) {
   closeSecondaryWindows(settingsWindow);
   const focusedWindow = BrowserWindow.getFocusedWindow() || Array.from(browserWindows)[0];
   if (focusedWindow && !focusedWindow.isDestroyed()) {
-    focusedWindow.webContents.send('close-all-popups');
+    // Hide in-page panels, but do not let the renderer close secondary windows:
+    // that path would close the settings window we are about to open.
+    focusedWindow.webContents.send('close-popups-keep-secondary');
   }
   if (settingsWindow && !settingsWindow.isDestroyed()) {
     settingsWindow.focus();
@@ -4529,6 +4533,9 @@ ipcMain.handle('save-setting', (event, { key, value }) => {
     setSetting('performanceMode', derived);
     applyPerformanceMode(derived);
   }
+  if (key === 'customFilters' && typeof adblockCustomFilterReloader === 'function') {
+    adblockCustomFilterReloader(value);
+  }
   if (key === 'spellCheck' && session.defaultSession) {
     try { session.defaultSession.setSpellCheckerEnabled(Boolean(value)); } catch (e) {}
   }
@@ -4547,6 +4554,309 @@ ipcMain.handle('save-setting', (event, { key, value }) => {
     scheduleDebouncedSyncPush();
   }
   return res;
+});
+
+// --- Chrome extensions ---
+function readToolbarLayoutSetting() {
+  try {
+    const parsed = JSON.parse(getSetting('toolbarLayout', '') || 'null');
+    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+  } catch (e) {}
+  return JSON.parse(JSON.stringify(DEFAULT_TOOLBAR_LAYOUT));
+}
+
+function writeToolbarLayoutSetting(layout) {
+  const json = JSON.stringify(layout);
+  setSetting('toolbarLayout', json);
+  broadcastSettingChanged('toolbarLayout', json);
+}
+
+function addExtensionToolbarButton(ext) {
+  const layout = readToolbarLayoutSetting();
+  const itemId = 'ext:' + ext.id;
+  const next = layout.filter((item) => item && item.id !== itemId);
+  next.push({ id: itemId, type: 'extension', extensionId: ext.id, name: ext.name, enabled: true });
+  writeToolbarLayoutSetting(next);
+}
+
+function removeExtensionToolbarButton(extensionId) {
+  const layout = readToolbarLayoutSetting();
+  const itemId = 'ext:' + extensionId;
+  writeToolbarLayoutSetting(layout.filter((item) => item && item.id !== itemId));
+}
+
+function broadcastExtensionsChanged() {
+  const payload = extensionHost.list();
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win && !win.isDestroyed()) {
+      win.webContents.send('extensions-changed', payload);
+    }
+  }
+  if (typeof tabViews !== 'undefined' && tabViews) {
+    for (const view of tabViews.values()) {
+      if (view && view.webContents && !view.webContents.isDestroyed()) {
+        view.webContents.send('extensions-changed', payload);
+      }
+    }
+  }
+}
+
+let extensionPopupWindow = null;
+let extensionPopupId = null;
+let extensionPopupParent = null;
+let extensionPopupAnchorRect = null;
+let extensionPopupZoomFactor = 1;
+let extensionPopupAppliedSize = null;
+
+// Chrome sizes extension popups to their content, capped at 800x600.
+const EXTENSION_POPUP_MIN_HEIGHT = 80;
+const EXTENSION_POPUP_MAX_WIDTH = 800;
+const EXTENSION_POPUP_MAX_HEIGHT = 600;
+const EXTENSION_POPUP_DEFAULT_WIDTH = 400;
+
+// Extension popups follow the browser's Default zoom so their UI is scaled like
+// the pages next to them (zoom already accounts for the display scale factor).
+function getExtensionPopupZoom() {
+  try {
+    const factor = parseInt(require('./db/history').getSetting('defaultZoom', '100'), 10) / 100;
+    if (!isNaN(factor) && factor >= 0.5 && factor <= 3) return factor;
+  } catch (e) {}
+  return 1;
+}
+
+function positionExtensionPopup(popup, parentWin, rect, width, height) {
+  if (!popup || popup.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
+  const anchor = rect || { left: 0, bottom: 0 };
+  const bounds = parentWin.getContentBounds();
+  const maxX = bounds.x + Math.max(0, bounds.width - width - 12);
+  const maxY = bounds.y + Math.max(0, bounds.height - height - 12);
+  const x = Math.round(Math.min(Math.max(bounds.x + 8, bounds.x + (anchor.left || 0)), maxX));
+  const y = Math.round(Math.min(bounds.y + (anchor.bottom || 0) + 6, maxY));
+  popup.setBounds({ x, y, width, height });
+}
+
+function resizeExtensionPopup(width, height) {
+  const popup = extensionPopupWindow;
+  if (!popup || popup.isDestroyed()) return;
+  const next = { width: Math.round(width), height: Math.round(height) };
+  if (extensionPopupAppliedSize &&
+      extensionPopupAppliedSize.width === next.width &&
+      extensionPopupAppliedSize.height === next.height) {
+    return;
+  }
+  extensionPopupAppliedSize = next;
+  positionExtensionPopup(popup, extensionPopupParent, extensionPopupAnchorRect, next.width, next.height);
+}
+
+// The popup preload reports its laid-out size in unscaled CSS pixels. The window
+// keeps the popup's design width (growing only when the content is wider) and
+// shrinks in height so short popups do not leave a large empty window.
+function fitExtensionPopupToContent(measurement) {
+  const cssWidth = Number(measurement && measurement.width) || 0;
+  const cssHeight = Number(measurement && measurement.height) || 0;
+  if (!(cssWidth > 0) || !(cssHeight > 0)) return;
+  const zoom = extensionPopupZoomFactor || 1;
+  const maxWidth = Math.round(EXTENSION_POPUP_MAX_WIDTH * zoom);
+  const maxHeight = Math.round(EXTENSION_POPUP_MAX_HEIGHT * zoom);
+  const minHeight = Math.min(Math.round(EXTENSION_POPUP_MIN_HEIGHT * zoom), maxHeight);
+  const cssTargetWidth = Math.min(
+    Math.max(cssWidth, EXTENSION_POPUP_DEFAULT_WIDTH),
+    EXTENSION_POPUP_MAX_WIDTH
+  );
+  const width = Math.round(cssTargetWidth * zoom);
+  const height = Math.min(Math.max(Math.round(cssHeight * zoom), minHeight), maxHeight);
+  resizeExtensionPopup(width, height);
+}
+
+ipcMain.on('extensions:popup-resize', (event, measurement) => {
+  const popup = extensionPopupWindow;
+  if (!popup || popup.isDestroyed()) return;
+  if (popup.webContents !== event.sender) return;
+  fitExtensionPopupToContent(measurement);
+});
+
+ipcMain.on('extensions:popup-zoom', (event) => {
+  const popup = extensionPopupWindow;
+  event.returnValue = popup && !popup.isDestroyed() && popup.webContents === event.sender
+    ? extensionPopupZoomFactor
+    : 1;
+});
+
+function openExtensionPopup(event, payload) {
+  const extensionId = payload && payload.extensionId;
+  const rect = (payload && payload.rect) || { left: 0, bottom: 0 };
+  const popupUrl = extensionHost.getPopupUrl(extensionId);
+  const parentWin = BrowserWindow.fromWebContents(event.sender);
+  if (!popupUrl || !parentWin || parentWin.isDestroyed()) return;
+
+  if (extensionPopupWindow && !extensionPopupWindow.isDestroyed()) {
+    const wasSame = extensionPopupId === extensionId;
+    extensionPopupWindow.close();
+    if (wasSame) return;
+  }
+
+  const zoom = getExtensionPopupZoom();
+  const width = Math.round(EXTENSION_POPUP_DEFAULT_WIDTH * zoom);
+  const height = Math.round(EXTENSION_POPUP_MAX_HEIGHT * zoom);
+  const bounds = parentWin.getContentBounds();
+  const maxX = bounds.x + Math.max(0, bounds.width - width - 12);
+  const maxY = bounds.y + Math.max(0, bounds.height - height - 12);
+  const x = Math.round(Math.min(Math.max(bounds.x + 8, bounds.x + rect.left), maxX));
+  const y = Math.round(Math.min(bounds.y + (rect.bottom || 0) + 6, maxY));
+
+  const popup = new BrowserWindow({
+    parent: parentWin,
+    frame: false,
+    resizable: false,
+    show: false,
+    skipTaskbar: true,
+    useContentSize: true,
+    x,
+    y,
+    width,
+    height,
+    backgroundColor: '#171720',
+    webPreferences: {
+      preload: path.join(__dirname, 'extension-popup-preload.js'),
+      sandbox: true,
+      nodeIntegration: false,
+      contextIsolation: true
+    }
+  });
+
+  extensionPopupWindow = popup;
+  extensionPopupId = extensionId;
+  extensionPopupParent = parentWin;
+  extensionPopupAnchorRect = rect;
+  extensionPopupZoomFactor = zoom;
+  extensionPopupAppliedSize = { width, height };
+
+  popup.loadURL(popupUrl);
+  popup.once('ready-to-show', () => {
+    if (!popup.isDestroyed()) popup.show();
+  });
+  popup.on('blur', () => { if (!popup.isDestroyed()) popup.close(); });
+  popup.on('closed', () => {
+    try { if (popup.webContents && popup.webContents.debugger.isAttached()) popup.webContents.debugger.detach(); } catch (e) {}
+    if (extensionPopupWindow === popup) {
+      extensionPopupWindow = null;
+      extensionPopupId = null;
+      extensionPopupParent = null;
+      extensionPopupAnchorRect = null;
+      extensionPopupZoomFactor = 1;
+      extensionPopupAppliedSize = null;
+    }
+  });
+}
+
+// Tabs opened by extension popups through chrome.tabs.create.
+// These are regular Napture tabs: we ask the window renderer to create one and
+// keep a synthetic chrome.tabs entry so the extension can query/focus it.
+const extensionTabs = new Map();
+let nextExtensionTabId = 100000;
+
+// Extensions act while their popup has focus, so the focused window is the popup
+// itself (which ignores open-url-in-new-tab). Target the popup's parent app window.
+function getExtensionTargetWindow() {
+  if (extensionPopupParent && !extensionPopupParent.isDestroyed()) return extensionPopupParent;
+  const focused = BrowserWindow.getFocusedWindow();
+  if (focused && browserWindows.has(focused)) return focused;
+  for (const win of browserWindows) {
+    if (win && !win.isDestroyed()) return win;
+  }
+  return null;
+}
+
+function openExtensionTab(props) {
+  const url = props && typeof props.url === 'string' && props.url ? props.url : 'about:blank';
+  const id = nextExtensionTabId++;
+  const win = getExtensionTargetWindow();
+  const tab = {
+    id,
+    windowId: win && !win.isDestroyed() ? win.id : -1,
+    active: true,
+    highlighted: true,
+    pinned: false,
+    incognito: false,
+    url,
+    title: ''
+  };
+  extensionTabs.set(id, tab);
+
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('open-url-in-new-tab', { url });
+  }
+
+  return tab;
+}
+
+ipcMain.handle('extensions:tabs-create', (event, props) => openExtensionTab(props));
+
+ipcMain.handle('extensions:open-full-page', () => {
+  if (!extensionPopupId) return null;
+  const popupUrl = extensionHost.getPopupUrl(extensionPopupId);
+  if (!popupUrl) return null;
+  const tab = openExtensionTab({ url: popupUrl + '#/' });
+  if (extensionPopupWindow && !extensionPopupWindow.isDestroyed()) extensionPopupWindow.close();
+  return tab;
+});
+
+ipcMain.handle('extensions:tabs-update', (event, { id, props }) => {
+  const tab = extensionTabs.get(id);
+  if (!tab) return null;
+  const nextUrl = props && typeof props.url === 'string' ? props.url : '';
+  if (nextUrl && nextUrl !== tab.url) {
+    tab.url = nextUrl;
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      win.webContents.send('open-url-in-new-tab', { url: nextUrl });
+    }
+  }
+  return tab;
+});
+
+ipcMain.handle('extensions:tabs-query', (event, query) => {
+  const pattern = query && typeof query.url === 'string' ? query.url : null;
+  const normalized = pattern ? pattern.replace(/\*/g, '') : null;
+  const list = [];
+  for (const tab of extensionTabs.values()) {
+    if (normalized && (!tab.url || !tab.url.startsWith(normalized))) continue;
+    list.push(tab);
+  }
+  return list;
+});
+
+ipcMain.handle('extensions:window-update', (event, { id, props }) => {
+  const win = BrowserWindow.fromId(id);
+  if (!win || win.isDestroyed()) return null;
+  if (!props || props.focused !== false) win.focus();
+  return { id: win.id, focused: true };
+});
+
+ipcMain.handle('extensions:list', () => extensionHost.list());
+
+ipcMain.handle('extensions:install', async (event, input) => {
+  const ext = await extensionHost.installFromStore(input);
+  addExtensionToolbarButton(ext);
+  broadcastExtensionsChanged();
+  return ext;
+});
+
+ipcMain.handle('extensions:remove', async (event, extensionId) => {
+  const list = await extensionHost.remove(extensionId);
+  removeExtensionToolbarButton(extensionId);
+  broadcastExtensionsChanged();
+  return list;
+});
+
+ipcMain.on('extensions:open-popup', (event, payload) => {
+  openExtensionPopup(event, payload);
 });
 
 ipcMain.handle('save-all-settings', (event, settings) => {
@@ -5584,6 +5894,8 @@ function getDefaultSettings() {
     blockCookies: 'incognito',
     doNotTrack: false,
     httpsOnly: false,
+    adBlock: true,
+    customFilters: '',
     startupMode: 'restore_all',
     downloadPath: app.getPath('downloads'),
     askSaveLocation: false,
@@ -6565,11 +6877,120 @@ app.whenReady().then(async () => {
     'moatads.com'
   ];
 
+  // Electron has no chrome.declarativeNetRequest, so MV3 ad blockers installed as
+  // extensions (uBlock, uBlock Origin Lite, ...) load fine but cannot block anything.
+  // Run uBlock/EasyList-compatible filter lists here instead.
+  let adBlocker = null;
+  let customFiltersEngine = null;
+  let adblockerLib = null;
+  let electronDetailsToRequest = null;
+
+  // User rules from Settings → Privacy and Security, parsed in uBlock "My filters" syntax.
+  function rebuildCustomFiltersEngine(text) {
+    if (!adblockerLib) return;
+    const trimmed = String(text || '').trim();
+    if (!trimmed) {
+      customFiltersEngine = null;
+      return;
+    }
+    try {
+      customFiltersEngine = adblockerLib.FiltersEngine.parse(trimmed);
+    } catch (err) {
+      customFiltersEngine = null;
+      console.error('Custom filter rules failed to parse:', err && err.message);
+    }
+  }
+  adblockCustomFilterReloader = rebuildCustomFiltersEngine;
+
+  function injectCustomCosmeticFilters(event, url, msg) {
+    if (!customFiltersEngine || !event || !event.sender || event.sender.isDestroyed()) return;
+    try {
+      let hostname = '';
+      let domain = '';
+      try {
+        const parsed = new URL(url);
+        hostname = parsed.hostname || '';
+        domain = (require('tldts-experimental').parse(url).domain) || hostname.replace(/^www\./, '');
+      } catch (e) {}
+      const isFirstRun = msg === undefined;
+      const { active, styles } = customFiltersEngine.getCosmeticsFilters({
+        url,
+        hostname,
+        domain,
+        classes: msg && msg.classes,
+        hrefs: msg && msg.hrefs,
+        ids: msg && msg.ids,
+        getBaseRules: isFirstRun,
+        getInjectionRules: false,
+        getExtendedRules: false,
+        getRulesFromHostname: isFirstRun,
+        getRulesFromDOM: !isFirstRun
+      });
+      if (active !== false && styles) {
+        event.sender.insertCSS(styles, { cssOrigin: 'user' });
+      }
+    } catch (e) {}
+  }
+
+  try {
+    adblockerLib = require('@ghostery/adblocker-electron');
+    electronDetailsToRequest = adblockerLib.fromElectronDetails;
+    rebuildCustomFiltersEngine(getSetting('customFilters', ''));
+    adblockerLib.ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+      path: path.join(app.getPath('userData'), 'adblock-engine.bin'),
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile
+    }).then((blocker) => {
+      adBlocker = blocker;
+      try {
+        // Cosmetic filtering (hiding ad containers) needs the library's preload in
+        // each frame plus its two IPC handlers; it does not touch webRequest.
+        const preloadPath = require.resolve('@ghostery/adblocker-electron-preload');
+        session.defaultSession.registerPreloadScript({ type: 'frame', filePath: preloadPath });
+        ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
+          if (!getSetting('adBlock', true)) return { active: false };
+          injectCustomCosmeticFilters(event, url, msg);
+          return adBlocker.onInjectCosmeticFilters(event, url, msg);
+        });
+        ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', () => getSetting('adBlock', true));
+      } catch (err) {
+        console.error('Cosmetic filtering unavailable:', err && err.message);
+      }
+      console.log('Ad blocker ready (filter lists + cosmetic filtering active)');
+    }).catch((err) => {
+      console.error('Ad blocker lists failed to load:', err && err.message);
+    });
+  } catch (err) {
+    console.error('Ad blocker unavailable:', err && err.message);
+  }
+
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const lowerUrl = details.url.toLowerCase();
-    for (let i = 0; i < adTrackerPatterns.length; i++) {
-      if (lowerUrl.includes(adTrackerPatterns[i])) {
-        return callback({ cancel: true });
+    const adBlockEnabled = getSetting('adBlock', true);
+    let allowlisted = false;
+
+    if (adBlockEnabled && details.resourceType !== 'mainFrame' && customFiltersEngine && electronDetailsToRequest) {
+      try {
+        const custom = customFiltersEngine.match(electronDetailsToRequest(details));
+        if (custom.redirect) return callback({ redirectURL: custom.redirect.dataUrl });
+        if (custom.match) return callback({ cancel: true });
+        allowlisted = Boolean(custom.exception);
+      } catch (e) {}
+    }
+
+    if (adBlockEnabled && !allowlisted && adBlocker && details.resourceType !== 'mainFrame') {
+      try {
+        const { match, redirect } = adBlocker.match(electronDetailsToRequest(details));
+        if (redirect) return callback({ redirectURL: redirect.dataUrl });
+        if (match) return callback({ cancel: true });
+      } catch (e) {}
+    }
+
+    if (adBlockEnabled && !allowlisted) {
+      const lowerUrl = details.url.toLowerCase();
+      for (let i = 0; i < adTrackerPatterns.length; i++) {
+        if (lowerUrl.includes(adTrackerPatterns[i])) {
+          return callback({ cancel: true });
+        }
       }
     }
 
@@ -6750,6 +7171,13 @@ app.whenReady().then(async () => {
       broadcastDownloadUpdated();
     });
   });
+
+  // Load any installed Chrome extensions into the default session before tabs open
+  try {
+    await extensionHost.init();
+  } catch (e) {
+    console.error('Failed to initialize extension host:', e && e.message);
+  }
 
   createBrowserWindow();
 

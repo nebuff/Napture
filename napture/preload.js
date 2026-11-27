@@ -138,6 +138,15 @@ contextBridge.exposeInMainWorld('naptureAPI', {
   },
   getSettings: () => ipcRenderer.invoke('get-settings'),
   saveSetting: (key, value) => ipcRenderer.invoke('save-setting', { key, value }),
+  extensionsList: () => ipcRenderer.invoke('extensions:list'),
+  extensionsInstall: (input) => ipcRenderer.invoke('extensions:install', input),
+  extensionsRemove: (extensionId) => ipcRenderer.invoke('extensions:remove', extensionId),
+  openExtensionPopup: (payload) => ipcRenderer.send('extensions:open-popup', payload),
+  onExtensionsChanged: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('extensions-changed', subscription);
+    return () => ipcRenderer.removeListener('extensions-changed', subscription);
+  },
   saveAllSettings: (settings) => ipcRenderer.invoke('save-all-settings', settings),
   isNeProtocolSupported: () => ipcRenderer.invoke('is-ne-protocol-supported'),
   flushNeDnsCache: () => ipcRenderer.invoke('flush-ne-dns-cache'),
@@ -164,6 +173,11 @@ contextBridge.exposeInMainWorld('naptureAPI', {
     const subscription = () => callback();
     ipcRenderer.on('close-all-popups', subscription);
     return () => ipcRenderer.removeListener('close-all-popups', subscription);
+  },
+  onClosePopupsKeepSecondary: (callback) => {
+    const subscription = () => callback();
+    ipcRenderer.on('close-popups-keep-secondary', subscription);
+    return () => ipcRenderer.removeListener('close-popups-keep-secondary', subscription);
   },
   openDownloadedFile: (itemData) => ipcRenderer.send('open-downloaded-file', itemData),
   showDownloadedFileInFolder: (itemData) => ipcRenderer.send('show-downloaded-file-in-folder', itemData),
