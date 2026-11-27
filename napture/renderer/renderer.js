@@ -3272,6 +3272,14 @@ if (window.naptureAPI && window.naptureAPI.onCloseAllPopups) {
   });
 }
 
+// Used when the app itself opens a secondary window (Settings): hide in-page
+// panels without closing that window through closeAllPopups().
+if (window.naptureAPI && window.naptureAPI.onClosePopupsKeepSecondary) {
+  window.naptureAPI.onClosePopupsKeepSecondary(() => {
+    closeAllPopups('keep-secondary-windows');
+  });
+}
+
 // HTML Fullscreen: hide browser chrome when a page goes fullscreen (e.g. YouTube video)
 if (window.naptureAPI && window.naptureAPI.onHtmlFullscreenState) {
   window.naptureAPI.onHtmlFullscreenState((isFullscreen) => {
@@ -4343,6 +4351,60 @@ if (window.naptureAPI && window.naptureAPI.onClosePopups) {
 // Highly Customizable Toolbar Engine: Workspace Customizer, Invariants & Drag-and-Drop
 // ==========================================================================
 
+let extensionDescriptors = [];
+
+const EXTENSION_FALLBACK_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2" fill="none"><path d="M20.5 11H19V7a2 2 0 0 0-2-2h-4V3.5a2.5 2.5 0 0 0-5 0V5H4a2 2 0 0 0-2 2v4h1.5a2.5 2.5 0 0 1 0 5H2v4a2 2 0 0 0 2 2h4v-1.5a2.5 2.5 0 0 1 5 0V22h4a2 2 0 0 0 2-2v-4h1.5a2.5 2.5 0 0 0 0-5z"></path></svg>';
+
+function getExtensionDescriptor(extensionId) {
+  if (!extensionId) return null;
+  return extensionDescriptors.find((ext) => ext.id === extensionId) || null;
+}
+
+function extensionIconMarkup(ext, size) {
+  const dim = size || 16;
+  if (ext && ext.iconDataUrl) {
+    const src = String(ext.iconDataUrl).replace(/"/g, '&quot;');
+    return '<img src="' + src + '" width="' + dim + '" height="' + dim + '" class="toolbar-extension-icon" alt="">';
+  }
+  return EXTENSION_FALLBACK_ICON;
+}
+
+function getExtensionPaletteItems() {
+  return extensionDescriptors.filter((ext) => ext.hasAction).map((ext) => ({
+    id: 'ext:' + ext.id,
+    type: 'extension',
+    extensionId: ext.id,
+    name: ext.name,
+    desc: 'Extension action button',
+    isMultiple: false,
+    icon: extensionIconMarkup(ext, 16)
+  }));
+}
+
+async function loadExtensionDescriptors() {
+  if (!window.naptureAPI || !window.naptureAPI.extensionsList) return;
+  try {
+    const list = await window.naptureAPI.extensionsList();
+    extensionDescriptors = Array.isArray(list) ? list : [];
+  } catch (e) {
+    extensionDescriptors = [];
+  }
+  if (typeof renderToolbarCustomizable === 'function') renderToolbarCustomizable();
+  if (typeof isToolbarCustomizing !== 'undefined' && isToolbarCustomizing && typeof renderCustomizerWorkspace === 'function') {
+    renderCustomizerWorkspace();
+  }
+}
+
+if (typeof window !== 'undefined' && window.naptureAPI && window.naptureAPI.onExtensionsChanged) {
+  window.naptureAPI.onExtensionsChanged((list) => {
+    extensionDescriptors = Array.isArray(list) ? list : [];
+    if (typeof renderToolbarCustomizable === 'function') renderToolbarCustomizable();
+    if (typeof isToolbarCustomizing !== 'undefined' && isToolbarCustomizing && typeof renderCustomizerWorkspace === 'function') {
+      renderCustomizerWorkspace();
+    }
+  });
+}
+
 const CUSTOMIZER_PALETTE_CATALOG = [
   { id: 'back-btn', type: 'system', name: 'Back', desc: 'Navigate backward', icon: '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="15 18 9 12 15 6"></polyline></svg>' },
   { id: 'forward-btn', type: 'system', name: 'Forward', desc: 'Navigate forward', icon: '<svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" stroke-width="2.5" fill="none"><polyline points="9 18 15 12 9 6"></polyline></svg>' },
@@ -4399,7 +4461,7 @@ function sanitizeToolbarLayout(layout) {
     return JSON.parse(JSON.stringify(DEFAULT_TOOLBAR_LAYOUT_ITEMS));
   }
 
-  const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator']);
+  const validTypes = new Set(['system', 'link', 'folder', 'margin', 'spacer', 'separator', 'extension']);
   const knownSystemIds = new Set([
     'brand-menu-btn', 'back-btn', 'forward-btn', 'reload-btn', 'home-btn',
     'address-container', 'downloads-btn', 'history-btn', 'bookmarks-btn', 'newtab-btn'
@@ -4411,7 +4473,7 @@ function sanitizeToolbarLayout(layout) {
 
   for (const item of layout) {
     if (!item || typeof item !== 'object') continue;
-    let { id, type, name, url, favicon, width, enabled, children } = item;
+    let { id, type, name, url, favicon, width, enabled, children, extensionId } = item;
 
     if (!id || typeof id !== 'string') continue;
     id = id.trim();
@@ -4451,6 +4513,7 @@ function sanitizeToolbarLayout(layout) {
       cleanItem.favicon = favicon || getFaviconForUrl(cleanItem.url);
     }
     if (type === 'folder') cleanItem.children = Array.isArray(children) ? children.filter(c => c && c.id) : [];
+    if (type === 'extension' && extensionId) cleanItem.extensionId = String(extensionId);
     if (width && typeof width === 'number' && width > 0) cleanItem.width = width;
 
     sanitized.push(cleanItem);
@@ -4690,6 +4753,8 @@ function insertPaletteItem(catalogItem, targetIdx = -1, targetZone = 'topbar') {
     newItem = { id: 'margin-' + Date.now(), type: 'margin', name: 'Flexible Space', enabled: true };
   } else if (catalogItem.type === 'separator') {
     newItem = { id: 'sep-' + Date.now(), type: 'separator', name: 'Fixed Separator', enabled: true };
+  } else if (catalogItem.type === 'extension') {
+    newItem = { id: catalogItem.id, type: 'extension', extensionId: catalogItem.extensionId, name: catalogItem.name, enabled: true };
   } else {
     newItem = { id: catalogItem.id, type: 'system', name: catalogItem.name, enabled: true };
   }
@@ -5122,6 +5187,24 @@ function renderToolbarCustomizable() {
         if (typeof createTab === 'function') createTab();
       });
       wrapper.appendChild(btn);
+    } else if (item.type === 'extension') {
+      const ext = getExtensionDescriptor(item.extensionId || String(item.id).replace(/^ext:/, ''));
+      const extBtn = document.createElement('button');
+      extBtn.className = 'nav-btn toolbar-system-btn toolbar-extension-btn';
+      extBtn.title = (ext && ext.name) || item.name || 'Extension';
+      extBtn.innerHTML = extensionIconMarkup(ext, 16);
+      extBtn.addEventListener('click', (e) => {
+        if (isToolbarCustomizing) return;
+        e.stopPropagation();
+        const rect = extBtn.getBoundingClientRect();
+        if (window.naptureAPI && window.naptureAPI.openExtensionPopup) {
+          window.naptureAPI.openExtensionPopup({
+            extensionId: item.extensionId || String(item.id).replace(/^ext:/, ''),
+            rect: { left: Math.round(rect.left), bottom: Math.round(rect.bottom) }
+          });
+        }
+      });
+      wrapper.appendChild(extBtn);
     } else if (item.type === 'link') {
       const linkBtn = document.createElement('button');
       linkBtn.className = 'nav-btn toolbar-custom-btn';
@@ -5227,7 +5310,7 @@ function renderCustomizerWorkspace() {
   if (!paletteGrid) return;
   paletteGrid.innerHTML = '';
 
-  CUSTOMIZER_PALETTE_CATALOG.forEach(catalogItem => {
+  CUSTOMIZER_PALETTE_CATALOG.concat(getExtensionPaletteItems()).forEach(catalogItem => {
     const card = document.createElement('div');
     card.className = 'customizer-palette-card';
 
@@ -6191,4 +6274,5 @@ loadToolbarState();
 loadSidebarBottomState();
 renderToolbarCustomizable();
 renderSidebarBottom();
+loadExtensionDescriptors();
 

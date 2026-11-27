@@ -142,6 +142,15 @@ if (isInternalPage()) {
       getSettings: () => ipcRenderer.invoke('get-settings'),
       saveSetting: (key, value) => ipcRenderer.invoke('save-setting', { key, value }),
       saveAllSettings: (settings) => ipcRenderer.invoke('save-all-settings', settings),
+      extensionsList: () => ipcRenderer.invoke('extensions:list'),
+      extensionsInstall: (input) => ipcRenderer.invoke('extensions:install', input),
+      extensionsRemove: (extensionId) => ipcRenderer.invoke('extensions:remove', extensionId),
+      openExtensionPopup: (payload) => ipcRenderer.send('extensions:open-popup', payload),
+      onExtensionsChanged: (callback) => {
+        const subscription = (event, data) => callback(data);
+        ipcRenderer.on('extensions-changed', subscription);
+        return () => ipcRenderer.removeListener('extensions-changed', subscription);
+      },
       isNeProtocolSupported: () => ipcRenderer.invoke('is-ne-protocol-supported'),
       flushNeDnsCache: () => ipcRenderer.invoke('flush-ne-dns-cache'),
       testNeResolver: (host, port) => ipcRenderer.invoke('test-ne-resolver', { host, port }),
