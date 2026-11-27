@@ -54,6 +54,31 @@ describe('GitHub Actions test coverage', () => {
   });
 });
 
+describe('GitHub Actions tests workflow', () => {
+  const testsPath = path.resolve(__dirname, '../../.github/workflows/tests.yml');
+
+  function loadTests() {
+    expect(fs.existsSync(testsPath)).toBe(true);
+    return YAML.parse(fs.readFileSync(testsPath, 'utf8'));
+  }
+
+  test('is named Tests and runs automatically on commits and pull requests', () => {
+    const workflow = loadTests();
+
+    expect(workflow.name).toBe('Tests');
+    expect(Object.keys(workflow.on)).toEqual(['push', 'pull_request', 'workflow_dispatch']);
+  });
+
+  test('installs from the lockfile and then runs the full Jest suite', () => {
+    const commands = loadTests().jobs.test.steps.filter((step) => step.run).map((step) => step.run);
+    const ciIndex = commands.findIndex((cmd) => /\bnpm ci\b/.test(cmd));
+    const testIndex = commands.findIndex((cmd) => /\bnpm (test|run test)\b/.test(cmd));
+
+    expect(testIndex).toBeGreaterThanOrEqual(0);
+    expect(testIndex).toBeGreaterThan(ciIndex);
+  });
+});
+
 describe('GitHub Actions release draft workflow', () => {
   const releasePath = path.resolve(__dirname, '../../.github/workflows/release.yml');
   const publishScriptPath = path.resolve(__dirname, '../../scripts/publish/ci-publish.sh');

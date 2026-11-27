@@ -1,0 +1,25 @@
+name: Tests
+
+# The full Jest suite on every commit and every pull request. Packaging lives in
+# build.yml (push to main + manual) and release.yml (manual), so a PR only has to
+# prove the code works before it lands.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+# A new commit supersedes the run for the previous one on the same branch/PR.
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
