@@ -1298,6 +1298,29 @@ function buildSettingsPage() {
     .update-status-badge.info { color: #818cf8; }
     .update-status-badge.error { color: #f87171; }
 
+    .import-type-options {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .import-type-option {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      cursor: pointer;
+      user-select: none;
+    }
+    .import-type-option input[type="checkbox"] {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      accent-color: #7f8cff;
+      cursor: pointer;
+    }
+
     /* Quick Site Snippets Styles */
     .snippet-prefix-wrapper {
       display: flex;
@@ -1634,6 +1657,17 @@ function buildSettingsPage() {
           <div class="card-group">
             <div class="card-row">
               <div class="row-info">
+                <div class="row-label">What to import</div>
+                <div class="row-desc">Pick which data the browser import buttons below copy over. Importing a bookmark file always imports bookmarks only.</div>
+              </div>
+              <div class="import-type-options">
+                <label class="import-type-option"><input type="checkbox" id="import-type-bookmarks" checked> Bookmarks</label>
+                <label class="import-type-option"><input type="checkbox" id="import-type-history" checked> History</label>
+                <label class="import-type-option"><input type="checkbox" id="import-type-cookies" checked> Cookies</label>
+              </div>
+            </div>
+            <div class="card-row">
+              <div class="row-info">
                 <div class="row-label">${t('import_bookmarks_btn')}</div>
                 <div class="row-desc">Import exported HTML or JSON bookmark files from Chrome, Firefox, Safari, Edge, or Brave</div>
               </div>
@@ -1642,28 +1676,28 @@ function buildSettingsPage() {
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Auto-Detect & Import Installed Browsers</div>
-                <div class="row-desc">Automatically scan and import bookmarks and history from all installed browsers on this machine</div>
+                <div class="row-desc">Automatically scan and import the selected data types from all installed browsers on this machine</div>
               </div>
               <button class="btn btn-primary btn-import-target" data-browser="all">Auto-Import All</button>
             </div>
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Google Chrome</div>
-                <div class="row-desc">Import bookmarks and history from Google Chrome & Chromium profiles</div>
+                <div class="row-desc">Import the selected data from Google Chrome & Chromium profiles</div>
               </div>
               <button class="btn btn-primary btn-import-target" data-browser="chrome">Import from Chrome</button>
             </div>
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Microsoft Edge</div>
-                <div class="row-desc">Import bookmarks and browsing history from Edge</div>
+                <div class="row-desc">Import the selected data from Edge</div>
               </div>
               <button class="btn btn-primary btn-import-target" data-browser="edge">Import from Edge</button>
             </div>
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Mozilla Firefox</div>
-                <div class="row-desc">Import bookmarks and browsing history from Firefox</div>
+                <div class="row-desc">Import the selected data from Firefox</div>
               </div>
               <button class="btn btn-primary btn-import-target" data-browser="firefox">Import from Firefox</button>
             </div>
@@ -2349,21 +2383,59 @@ function buildSettingsPage() {
 
     // --- Snippets UI Management ---
     let currentSnippets = [];
-    try {
+    (function loadSnippets() {
       const rawSnippets = ${JSON.stringify(settings.snippets || '')};
-      currentSnippets = rawSnippets ? JSON.parse(rawSnippets) : [
-        { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
-        { snippet: 'yt', description: 'Takes you to youtube', url: 'https://youtube.com' }
-      ];
-    } catch (e) {
-      currentSnippets = [
-        { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
-        { snippet: 'yt', description: 'Takes you to youtube', url: 'https://youtube.com' }
-      ];
+      let value = rawSnippets;
+      if (typeof value === 'string') {
+        if (!value.trim()) return;
+        try { value = JSON.parse(value); } catch (e) { return; }
+      }
+      if (!Array.isArray(value)) return;
+      currentSnippets = value
+        .filter(function (item) { return item && typeof item === 'object'; })
+        .map(function (item) {
+          return {
+            snippet: String(item.snippet == null ? '' : item.snippet).trim().replace(/^\\.+/, ''),
+            description: item.description == null ? '' : String(item.description),
+            url: item.url == null ? '' : String(item.url)
+          };
+        });
+    })();
+
+    function normalizeSnippetKey(value) {
+      return String(value == null ? '' : value).trim().replace(/^\\.+/, '').replace(/\\s+/g, '');
+    }
+
+    function normalizeSnippetUrl(value) {
+      let url = String(value == null ? '' : value).trim();
+      if (!url || url === 'https://' || url === 'http://') return '';
+      if (url.indexOf('://') === -1) url = 'https://' + url;
+      return url;
+    }
+
+    // Only complete snippets are persisted. A row that is still being typed, or a
+    // duplicate key, must never be written to the settings database.
+    function getSavableSnippets() {
+      const seen = new Set();
+      const list = [];
+      currentSnippets.forEach(function (item) {
+        const key = normalizeSnippetKey(item.snippet);
+        const url = normalizeSnippetUrl(item.url);
+        if (!key || !url) return;
+        const lower = key.toLowerCase();
+        if (seen.has(lower)) return;
+        seen.add(lower);
+        list.push({
+          snippet: key,
+          description: String(item.description == null ? '' : item.description).trim(),
+          url: url
+        });
+      });
+      return list;
     }
 
     function saveSnippets() {
-      persistSetting('snippets', JSON.stringify(currentSnippets));
+      persistSetting('snippets', JSON.stringify(getSavableSnippets()));
     }
 
     function renderSnippetsList() {
@@ -2371,13 +2443,13 @@ function buildSettingsPage() {
       if (!container) return;
 
       if (!currentSnippets || currentSnippets.length === 0) {
-        container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; padding: 20px; text-align: center;">No snippets set!</div>';
+        container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; padding: 20px; text-align: center;">No snippets set! Add one above, then type its .key in the address bar.</div>';
         return;
       }
 
       let html = '';
       currentSnippets.forEach((item, idx) => {
-        const snip = escapeHtml(item.snippet || '').replace(/^\./, '');
+        const snip = escapeHtml(item.snippet || '').replace(/^\\./, '');
         const desc = escapeHtml(item.description || '');
         const url = escapeHtml(item.url || 'https://');
 
@@ -2409,7 +2481,7 @@ function buildSettingsPage() {
       container.querySelectorAll('.snippet-key-input').forEach(inp => {
         inp.addEventListener('input', () => {
           const idx = parseInt(inp.dataset.index, 10);
-          let cleanVal = inp.value.trim().replace(/^\./, '');
+          let cleanVal = inp.value.trim().replace(/^\\./, '');
           if (inp.value !== cleanVal && inp.value.startsWith('.')) {
             inp.value = cleanVal;
           }
@@ -2418,6 +2490,22 @@ function buildSettingsPage() {
             saveSnippets();
           }
         });
+        inp.addEventListener('change', () => {
+          const idx = parseInt(inp.dataset.index, 10);
+          if (!currentSnippets[idx]) return;
+          const key = normalizeSnippetKey(inp.value);
+          inp.value = key;
+          currentSnippets[idx].snippet = key;
+          if (!key) {
+            showToast('Snippet key cannot be empty');
+            return;
+          }
+          const duplicate = currentSnippets.some((s, i) => i !== idx && normalizeSnippetKey(s.snippet).toLowerCase() === key.toLowerCase());
+          if (duplicate) {
+            showToast('Another snippet already uses .' + key);
+          }
+          saveSnippets();
+        });
       });
 
       container.querySelectorAll('.snippet-desc-input').forEach(inp => {
@@ -2425,6 +2513,13 @@ function buildSettingsPage() {
           const idx = parseInt(inp.dataset.index, 10);
           if (currentSnippets[idx]) {
             currentSnippets[idx].description = inp.value;
+            saveSnippets();
+          }
+        });
+        inp.addEventListener('change', () => {
+          const idx = parseInt(inp.dataset.index, 10);
+          if (currentSnippets[idx]) {
+            currentSnippets[idx].description = inp.value.trim();
             saveSnippets();
           }
         });
@@ -2437,6 +2532,18 @@ function buildSettingsPage() {
             currentSnippets[idx].url = inp.value;
             saveSnippets();
           }
+        });
+        inp.addEventListener('change', () => {
+          const idx = parseInt(inp.dataset.index, 10);
+          if (!currentSnippets[idx]) return;
+          const url = normalizeSnippetUrl(inp.value);
+          if (!url) {
+            showToast('Enter a destination URL for this snippet');
+            return;
+          }
+          currentSnippets[idx].url = url;
+          inp.value = url;
+          saveSnippets();
         });
       });
 
@@ -2517,23 +2624,51 @@ function buildSettingsPage() {
       });
     }
 
+    function getImportTypes() {
+      const isChecked = (id, fallback) => {
+        const el = document.getElementById(id);
+        return el ? el.checked : fallback;
+      };
+      return {
+        bookmarks: isChecked('import-type-bookmarks', true),
+        history: isChecked('import-type-history', true),
+        cookies: isChecked('import-type-cookies', true)
+      };
+    }
+
     // Individual Import Target Buttons
     document.querySelectorAll('.btn-import-target').forEach(btn => {
       btn.addEventListener('click', () => {
         const browser = btn.getAttribute('data-browser') || 'chrome';
         const origText = btn.textContent;
+        const types = getImportTypes();
+        if (!types.bookmarks && !types.history && !types.cookies) {
+          showToast('Select at least one thing to import (bookmarks, history or cookies).');
+          return;
+        }
         btn.textContent = 'Importing...';
         btn.disabled = true;
         if (window.naptureAPI && window.naptureAPI.importBrowserData) {
-          window.naptureAPI.importBrowserData(browser).then(res => {
+          window.naptureAPI.importBrowserData(browser, types).then(res => {
+            if (!res) {
+              btn.disabled = false;
+              btn.textContent = origText;
+              showToast('Import failed for ' + browser.toUpperCase() + '.');
+              return;
+            }
             const bmCount = res.importedBookmarksCount || 0;
             const histCount = res.importedHistoryCount || 0;
-            if (bmCount > 0 || histCount > 0) {
-              btn.textContent = 'Imported (' + bmCount + ' Bookmarks, ' + histCount + ' History)';
-              showToast('Bookmarks, history & data from ' + browser.toUpperCase() + ' sent straight to Napture!');
+            const cookieCount = res.importedCookiesCount || 0;
+            const parts = [];
+            if (bmCount > 0) parts.push(bmCount + ' Bookmarks');
+            if (histCount > 0) parts.push(histCount + ' History');
+            if (cookieCount > 0) parts.push(cookieCount + ' Cookies');
+            if (parts.length > 0) {
+              btn.textContent = 'Imported (' + parts.join(', ') + ')';
+              showToast('Imported ' + parts.join(', ') + ' from ' + browser.toUpperCase() + '.');
             } else {
               btn.textContent = 'No Data Found';
-              showToast('No bookmarks or history found in ' + browser.toUpperCase() + ' profile.');
+              showToast('No matching ' + (types.cookies ? 'bookmarks, history or cookies' : (types.history ? 'bookmarks or history' : 'bookmarks')) + ' found in ' + browser.toUpperCase() + ' profile.');
               setTimeout(() => { btn.textContent = origText; }, 3000);
             }
 

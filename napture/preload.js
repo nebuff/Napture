@@ -192,7 +192,7 @@ contextBridge.exposeInMainWorld('naptureAPI', {
   saveSession: (tabs) => ipcRenderer.invoke('save-session', tabs),
   loadSession: () => ipcRenderer.invoke('load-session'),
   selectDownloadDirectory: () => ipcRenderer.invoke('select-download-directory'),
-  importBrowserData: (browser) => ipcRenderer.invoke('import-browser-data', browser),
+  importBrowserData: (browser, types) => ipcRenderer.invoke('import-browser-data', browser, types),
   importBookmarksFile: (filePath) => ipcRenderer.invoke('import-bookmarks-file', filePath),
   onBrowserDataImported: (callback) => {
     const subscription = (event, data) => callback(data);

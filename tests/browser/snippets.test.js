@@ -6,20 +6,20 @@ jest.mock('electron', () => ({
   app: { getPath: jest.fn(() => require('os').tmpdir()) }
 }));
 
+const fs = require('fs');
+const path = require('path');
 const { getDefaultSettings } = require('../../napture/settings-ui');
 const i18n = require('../../napture/i18n');
+const snippets = require('../../napture/snippets-core');
 
 describe('Quick Site Snippets Suite', () => {
   describe('Default Configuration & i18n', () => {
-    it('should have an empty snippets array by default in getDefaultSettings()', () => {
+    it('ships an empty snippets list by default', () => {
       const defaults = getDefaultSettings();
-      expect(defaults.snippets).toBeDefined();
-      const parsed = JSON.parse(defaults.snippets);
-      expect(Array.isArray(parsed)).toBe(true);
-      expect(parsed.length).toBe(0);
+      expect(snippets.parseList(defaults.snippets)).toEqual([]);
     });
 
-    it('should translate snippet labels in all supported locales', () => {
+    it('translates snippet labels in all supported locales', () => {
       ['en-US', 'en-CA', 'cute'].forEach(lang => {
         expect(i18n.t('nav_snippets', lang)).toBeTruthy();
         expect(i18n.t('sec_snippets', lang)).toBeTruthy();
@@ -31,120 +31,134 @@ describe('Quick Site Snippets Suite', () => {
     });
   });
 
-  describe('Snippet Lookup and Redirection', () => {
-    function resolveSnippetUrl(inputUrl, snippetsList) {
-      if (!inputUrl) return null;
-      if (!Array.isArray(snippetsList) || snippetsList.length === 0) return null;
-
-      const rawKey = inputUrl.split(/\s*-\s*/)[0].trim().toLowerCase();
-      const cleanInput = rawKey.startsWith('.') ? rawKey : '.' + rawKey;
-      const matched = snippetsList.find(s => {
-        if (!s || !s.snippet) return false;
-        const key = '.' + String(s.snippet).trim().replace(/^\./, '').toLowerCase();
-        return key === cleanInput;
-      });
-
-      if (matched && matched.url) {
-        let targetUrl = String(matched.url).trim();
-        if (targetUrl && !targetUrl.includes('://')) {
-          targetUrl = 'https://' + targetUrl;
-        }
-        return targetUrl;
-      }
-      return null;
-    }
-
-    function sanitizeSnippetKey(inputVal) {
-      return inputVal.trim().replace(/^\./, '');
-    }
-
-    const testSnippets = [
-      { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
-      { snippet: '.yt', description: 'Takes you to youtube', url: 'youtube.com' }
+  describe('parseList', () => {
+    const stored = [
+      { snippet: '.mail', description: ' Takes you to gmail ', url: 'gmail.com' },
+      { snippet: 'yt', description: '', url: 'https://youtube.com' },
+      { snippet: '', description: 'missing key', url: 'https://example.com' },
+      { snippet: 'blank', description: 'missing url', url: 'https://' },
+      { snippet: 'MAIL', description: 'duplicate', url: 'https://other.com' }
     ];
 
-    it('should match .mail and return https://gmail.com', () => {
-      const res = resolveSnippetUrl('.mail', testSnippets);
-      expect(res).toBe('https://gmail.com');
+    it('accepts the stored JSON string form', () => {
+      const list = snippets.parseList(JSON.stringify(stored));
+      expect(list).toEqual([
+        { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
+        { snippet: 'yt', description: '', url: 'https://youtube.com' }
+      ]);
     });
 
-    it('should match .mail when description is included from in-line autocomplete', () => {
-      const res = resolveSnippetUrl('.mail - Takes you to gmail', testSnippets);
-      expect(res).toBe('https://gmail.com');
+    it('accepts an already-parsed array', () => {
+      expect(snippets.parseList(stored)).toHaveLength(2);
     });
 
-    it('should match .mail when description has no surrounding spaces around dash', () => {
-      const res = resolveSnippetUrl('.mail-Takes you to gmail', testSnippets);
-      expect(res).toBe('https://gmail.com');
+    it('tolerates a JSON string of a JSON string', () => {
+      expect(snippets.parseList(JSON.stringify(JSON.stringify(stored)))).toHaveLength(2);
     });
 
-    it('should correctly sanitize snippet key by stripping only leading dot without truncating key', () => {
-      expect(sanitizeSnippetKey('mail')).toBe('mail');
-      expect(sanitizeSnippetKey('.mail')).toBe('mail');
-      expect(sanitizeSnippetKey('yt')).toBe('yt');
-      expect(sanitizeSnippetKey('.yt')).toBe('yt');
+    it('returns an empty list for missing or malformed values', () => {
+      expect(snippets.parseList(undefined)).toEqual([]);
+      expect(snippets.parseList('')).toEqual([]);
+      expect(snippets.parseList('not json')).toEqual([]);
+      expect(snippets.parseList({})).toEqual([]);
     });
 
-    it('should match .yt and prepend https:// if missing', () => {
-      const res = resolveSnippetUrl('.yt', testSnippets);
-      expect(res).toBe('https://youtube.com');
-    });
-
-    it('should return null for unmatched inputs', () => {
-      const res = resolveSnippetUrl('.unknown', testSnippets);
-      expect(res).toBeNull();
+    it('normalizes keys and URLs', () => {
+      expect(snippets.normalizeKey('  .My  Site ')).toBe('MySite');
+      expect(snippets.normalizeUrl(' youtube.com ')).toBe('https://youtube.com');
+      expect(snippets.normalizeUrl('https://')).toBe('');
+      expect(snippets.normalizeUrl('ne://example.ne')).toBe('ne://example.ne');
     });
   });
 
-  describe('Snippet In-Line Search Suggestions', () => {
-    function getSnippetSuggestions(query, snippetsList) {
-      if (!query || !query.startsWith('.') || !Array.isArray(snippetsList)) return [];
-      const valLower = query.toLowerCase();
-      const snippetMatches = [];
-      snippetsList.forEach(s => {
-        if (!s || !s.snippet) return;
-        const key = '.' + String(s.snippet).trim().replace(/^\./, '');
-        if (key.toLowerCase().startsWith(valLower)) {
-          const desc = s.description && String(s.description).trim() ? ' - ' + String(s.description).trim() : '';
-          snippetMatches.push(`${key}${desc}`);
-        }
-      });
-      return snippetMatches;
-    }
+  describe('resolve', () => {
+    const list = snippets.parseList([
+      { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
+      { snippet: '.yt', description: 'Takes you to youtube', url: 'youtube.com' },
+      { snippet: 'my-site', description: 'dashed key', url: 'https://mysite.example' }
+    ]);
 
-    const testSnippets = [
+    it('matches .mail and returns https://gmail.com', () => {
+      expect(snippets.resolve('.mail', list)).toBe('https://gmail.com');
+    });
+
+    it('is case insensitive', () => {
+      expect(snippets.resolve('.MAIL', list)).toBe('https://gmail.com');
+    });
+
+    it('matches when the description is included from in-line autocomplete', () => {
+      expect(snippets.resolve('.mail - Takes you to gmail', list)).toBe('https://gmail.com');
+      expect(snippets.resolve('.mail-Takes you to gmail', list)).toBe('https://gmail.com');
+    });
+
+    it('prepends https:// when the stored URL has no scheme', () => {
+      expect(snippets.resolve('.yt', list)).toBe('https://youtube.com');
+    });
+
+    it('prefers the longest key so dashed snippets work', () => {
+      expect(snippets.resolve('.my-site', list)).toBe('https://mysite.example');
+    });
+
+    it('returns null for unmatched input or empty lists', () => {
+      expect(snippets.resolve('.unknown', list)).toBeNull();
+      expect(snippets.resolve('.mail', [])).toBeNull();
+      expect(snippets.resolve('', list)).toBeNull();
+    });
+  });
+
+  describe('suggestions', () => {
+    const list = snippets.parseList([
       { snippet: 'mail', description: 'Takes you to gmail', url: 'https://gmail.com' },
       { snippet: 'maps', description: 'Google Maps', url: 'https://maps.google.com' },
       { snippet: 'yt', description: 'Takes you to youtube', url: 'https://youtube.com' }
-    ];
+    ]);
 
-    it('should match all snippets starting with dot prefix', () => {
-      const res = getSnippetSuggestions('.', testSnippets);
-      expect(res).toEqual([
+    it('lists every snippet for a bare dot', () => {
+      expect(snippets.suggestions('.', list)).toEqual([
         '.mail - Takes you to gmail',
         '.maps - Google Maps',
         '.yt - Takes you to youtube'
       ]);
     });
 
-    it('should filter snippets matching .m', () => {
-      const res = getSnippetSuggestions('.m', testSnippets);
-      expect(res).toEqual([
+    it('filters by prefix', () => {
+      expect(snippets.suggestions('.m', list)).toEqual([
         '.mail - Takes you to gmail',
         '.maps - Google Maps'
       ]);
+      expect(snippets.suggestions('.mail', list)).toEqual(['.mail - Takes you to gmail']);
     });
 
-    it('should filter exact match .mail', () => {
-      const res = getSnippetSuggestions('.mail', testSnippets);
-      expect(res).toEqual([
-        '.mail - Takes you to gmail'
-      ]);
+    it('returns nothing without the dot prefix or on a miss', () => {
+      expect(snippets.suggestions('mail', list)).toEqual([]);
+      expect(snippets.suggestions('.x', list)).toEqual([]);
+    });
+  });
+
+  describe('Settings page wiring', () => {
+    it('keeps the snippet key sanitation regex escaped in the generated script', () => {
+      const { buildSettingsPage } = require('../../napture/settings-ui');
+      const html = buildSettingsPage();
+      // A single escaped dot would turn into /^./ after template interpolation and
+      // silently delete the first character of every snippet key.
+      expect(html).toContain(".replace(/^\\./, '')");
+      expect(html).not.toContain(".replace(/^./, '')");
+    });
+  });
+
+  describe('Renderer wiring', () => {
+    it('loads the shared snippets module before the renderer', () => {
+      const html = fs.readFileSync(path.join(__dirname, '../../napture/renderer/index.html'), 'utf8');
+      const core = html.indexOf('src="snippets-core.js"');
+      expect(core).toBeGreaterThan(-1);
+      expect(core).toBeLessThan(html.indexOf('src="renderer.js"'));
     });
 
-    it('should return empty array when no snippets match query', () => {
-      const res = getSnippetSuggestions('.x', testSnippets);
-      expect(res).toEqual([]);
+    it('resolves snippets through the shared module in the address bar', () => {
+      const renderer = fs.readFileSync(path.join(__dirname, '../../napture/renderer/renderer.js'), 'utf8');
+      expect(renderer).toContain('window.NaptureSnippets');
+      expect(renderer).toContain('resolveSnippetInput(url)');
+      expect(renderer).toContain('function navigateToQuery(');
     });
   });
 });

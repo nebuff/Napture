@@ -70,7 +70,7 @@
       "package.json"
     ],
     "win": {
-      "icon": "napture/logo.ico",
+      "icon": "napture/build/icon.ico",
       "target": [
         "nsis",
         "portable"

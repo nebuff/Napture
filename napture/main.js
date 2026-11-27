@@ -4317,12 +4317,27 @@ function ensureLinuxDesktopFile() {
     fs.mkdirSync(appsDir, { recursive: true });
     const iconPath = path.join(__dirname, 'logo.png');
 
+    // Installed builds ship their icon into the hicolor theme, and a desktop
+    // entry must reference an icon *name*: a path inside app.asar is not a
+    // readable image for the desktop shell, which left installed apps with the
+    // generic Electron icon. Only dev builds use an absolute file path.
+    let iconRef = 'napture';
+    if (!app.isPackaged && fs.existsSync(iconPath)) {
+      iconRef = iconPath;
+    } else if (fs.existsSync(iconPath)) {
+      try {
+        const iconDestDir = path.join(os.homedir(), '.local', 'share', 'icons', 'hicolor', '256x256', 'apps');
+        fs.mkdirSync(iconDestDir, { recursive: true });
+        fs.copyFileSync(iconPath, path.join(iconDestDir, 'napture.png'));
+      } catch (e) {}
+    }
+
     const content = `[Desktop Entry]
 Name=Napture
 Exec=${execCmd}
 Terminal=false
 Type=Application
-Icon=${fs.existsSync(iconPath) ? iconPath : 'napture'}
+Icon=${iconRef}
 StartupWMClass=Napture
 Comment=Lightweight, cross-platform Chromium-based web browser
 MimeType=x-scheme-handler/http;x-scheme-handler/https;text/html;application/xhtml+xml;
@@ -4927,7 +4942,33 @@ ipcMain.handle('import-bookmarks-file', async (event, customFilePath) => {
   }
 });
 
-ipcMain.handle('import-browser-data', async (event, browserName) => {
+// Chromium stores readable cookie values as plaintext on Linux unless a keyring is
+// in use, and wraps them in "v10"/"v11" AES-CBC blobs (PBKDF2 "peanuts" key).
+// Windows DPAPI and macOS Keychain blobs cannot be unwrapped without native APIs,
+// so those cookies are reported as skipped instead of being imported empty.
+function decryptChromiumCookieValue(encryptedValue, hostKey) {
+  try {
+    const buffer = Buffer.from(encryptedValue);
+    if (!buffer.length) return '';
+    const crypto = require('crypto');
+    const prefix = buffer.subarray(0, 3).toString('latin1');
+    if (prefix === 'v10' || prefix === 'v11') {
+      const key = crypto.pbkdf2Sync('peanuts', 'saltysalt', 1, 16, 'sha1');
+      const decipher = crypto.createDecipheriv('aes-128-cbc', key, Buffer.alloc(16, ' '));
+      const plain = Buffer.concat([decipher.update(buffer.subarray(3)), decipher.final()]);
+      // Chrome 80+ prepends SHA256(host_key) to Linux cookie values.
+      const hostHash = crypto.createHash('sha256').update(String(hostKey || '')).digest();
+      const body = plain.length > 32 && plain.subarray(0, 32).equals(hostHash) ? plain.subarray(32) : plain;
+      return body.toString('utf8');
+    }
+    if (process.platform === 'linux') return buffer.toString('utf8');
+    return '';
+  } catch (e) {
+    return '';
+  }
+}
+
+ipcMain.handle('import-browser-data', async (event, browserName, options) => {
   const os = require('os');
   const Database = require('better-sqlite3');
   const winAppData = process.env.LOCALAPPDATA || '';
@@ -4948,9 +4989,17 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
 
   let bookmarkPaths = [];
   let historyPaths = [];
+  let cookiePaths = [];
+  let firefoxCookiePaths = [];
   let isFirefox = false;
 
   const browserLower = (browserName || 'chrome').toLowerCase();
+
+  // Older callers pass no options: import bookmarks + history and leave cookies out.
+  const requestedTypes = options && typeof options === 'object' ? options : {};
+  const wantBookmarks = requestedTypes.bookmarks !== false;
+  const wantHistory = requestedTypes.history !== false;
+  const wantCookies = requestedTypes.cookies === true;
 
   // Helper to resolve profiles for Chromium-based browsers
   const resolveChromiumPaths = (baseDir) => {
@@ -4963,8 +5012,12 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
           if (fs.statSync(fullDir).isDirectory()) {
             const bmFile = path.join(fullDir, 'Bookmarks');
             const histFile = path.join(fullDir, 'History');
+            const cookieFile = path.join(fullDir, 'Cookies');
+            const networkCookieFile = path.join(fullDir, 'Network', 'Cookies');
             if (fs.existsSync(bmFile) && !bookmarkPaths.includes(bmFile)) bookmarkPaths.push(bmFile);
             if (fs.existsSync(histFile) && !historyPaths.includes(histFile)) historyPaths.push(histFile);
+            if (fs.existsSync(cookieFile) && !cookiePaths.includes(cookieFile)) cookiePaths.push(cookieFile);
+            if (fs.existsSync(networkCookieFile) && !cookiePaths.includes(networkCookieFile)) cookiePaths.push(networkCookieFile);
           }
         } catch (e) {}
       }
@@ -5065,14 +5118,16 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
   };
 
   if (!isFirefox) {
-    await processChromiumBookmarks();
-    if (importedBookmarksCount === 0) {
-      resolveAllBrowserPaths();
+    if (wantBookmarks) {
       await processChromiumBookmarks();
+      if (importedBookmarksCount === 0) {
+        resolveAllBrowserPaths();
+        await processChromiumBookmarks();
+      }
     }
 
     // 2. Process History for Chromium-based browsers
-    for (const hPath of historyPaths) {
+    for (const hPath of (wantHistory ? historyPaths : [])) {
       if (fs.existsSync(hPath)) {
         const tmpFile = path.join(osTemp, `napture_import_hist_${Date.now()}_${Math.random().toString(36).substr(2, 5)}.db`);
         try {
@@ -5206,14 +5261,14 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
           const { bookmarkNodes, historyRows } = parseFirefoxPlacesTree(tempDb);
           tempDb.close();
 
-          if (historyRows && historyRows.length > 0) {
+          if (wantHistory && historyRows && historyRows.length > 0) {
             for (const h of historyRows) {
               addHistory(h.url, h.title, '');
               importedHistoryCount++;
             }
           }
 
-          if (bookmarkNodes && bookmarkNodes.length > 0) {
+          if (wantBookmarks && bookmarkNodes && bookmarkNodes.length > 0) {
             const count = addBookmarksBatch(bookmarkNodes, 0);
             importedBookmarksCount += count;
             importedBookmarkNodes.push(...bookmarkNodes);
@@ -5229,15 +5284,120 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
         }
       }
     }
+
+    if (wantCookies) {
+      for (const profDir of candidateProfiles) {
+        const cPath = path.join(profDir, 'cookies.sqlite');
+        if (fs.existsSync(cPath) && !firefoxCookiePaths.includes(cPath)) firefoxCookiePaths.push(cPath);
+      }
+    }
   }
 
-  const totalCount = importedBookmarksCount + importedHistoryCount;
+  // 3. Cookies (Chromium and Firefox stores, best effort - see decryptChromiumCookieValue)
+  let importedCookiesCount = 0;
+  let skippedCookiesCount = 0;
+
+  if (wantCookies) {
+    const chromSameSite = { '-1': 'unspecified', '0': 'no_restriction', '1': 'lax', '2': 'strict' };
+    const firefoxSameSite = { 0: 'no_restriction', 1: 'lax', 2: 'strict' };
+    const activeSession = session.defaultSession;
+
+    const saveCookie = async (details) => {
+      try {
+        await activeSession.cookies.set(details);
+        importedCookiesCount++;
+      } catch (e) {
+        skippedCookiesCount++;
+      }
+    };
+
+    for (const cPath of cookiePaths) {
+      const tmpFile = path.join(osTemp, `napture_import_cookies_${Date.now()}_${Math.random().toString(36).substr(2, 5)}.db`);
+      try {
+        fs.copyFileSync(cPath, tmpFile);
+        const tempDb = new Database(tmpFile, { readonly: true });
+        const rows = tempDb.prepare('SELECT * FROM cookies').all();
+        tempDb.close();
+
+        for (const row of rows) {
+          const host = row.host_key;
+          const name = row.name;
+          if (!host || !name) { skippedCookiesCount++; continue; }
+
+          let value = row.value ? String(row.value) : '';
+          if (!value && row.encrypted_value) {
+            value = decryptChromiumCookieValue(row.encrypted_value, host);
+          }
+          if (!value) { skippedCookiesCount++; continue; }
+
+          const secure = Boolean(row.is_secure);
+          const cookiePath = row.path || '/';
+          const details = {
+            url: `${secure ? 'https' : 'http'}://${String(host).replace(/^\./, '')}${cookiePath}`,
+            name: String(name),
+            value: value,
+            domain: String(host),
+            path: cookiePath,
+            secure: secure,
+            httpOnly: Boolean(row.is_httponly),
+            sameSite: chromSameSite[String(row.samesite)] || 'unspecified'
+          };
+          const expirySeconds = Number(row.expires_utc) > 0 ? Math.round(Number(row.expires_utc) / 1000000 - 11644473600) : 0;
+          if (expirySeconds > Math.floor(Date.now() / 1000)) details.expirationDate = expirySeconds;
+          await saveCookie(details);
+        }
+      } catch (e) {
+        console.error('Failed reading chromium cookies db:', e);
+      } finally {
+        try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) {}
+      }
+    }
+
+    for (const cPath of firefoxCookiePaths) {
+      const tmpFile = path.join(osTemp, `napture_import_ff_cookies_${Date.now()}_${Math.random().toString(36).substr(2, 5)}.db`);
+      try {
+        fs.copyFileSync(cPath, tmpFile);
+        const tempDb = new Database(tmpFile, { readonly: true });
+        const rows = tempDb.prepare('SELECT host, name, value, path, expiry, isSecure, isHttpOnly, sameSite FROM cookies').all();
+        tempDb.close();
+
+        for (const row of rows) {
+          if (!row.host || !row.name || !row.value) { skippedCookiesCount++; continue; }
+          const secure = Boolean(row.isSecure);
+          const cookiePath = row.path || '/';
+          const details = {
+            url: `${secure ? 'https' : 'http'}://${String(row.host).replace(/^\./, '')}${cookiePath}`,
+            name: String(row.name),
+            value: String(row.value),
+            domain: String(row.host),
+            path: cookiePath,
+            secure: secure,
+            httpOnly: Boolean(row.isHttpOnly),
+            sameSite: firefoxSameSite[row.sameSite] || 'unspecified'
+          };
+          const expirySeconds = Number(row.expiry) || 0;
+          if (expirySeconds > Math.floor(Date.now() / 1000)) details.expirationDate = expirySeconds;
+          await saveCookie(details);
+        }
+      } catch (e) {
+        console.error('Failed reading firefox cookies db:', e);
+      } finally {
+        try { if (fs.existsSync(tmpFile)) fs.unlinkSync(tmpFile); } catch (e) {}
+      }
+    }
+  }
+
+  const totalCount = importedBookmarksCount + importedHistoryCount + importedCookiesCount;
 
   // 3. Show completion status on importer window
   if (impWin && !impWin.isDestroyed()) {
+    const subtitleParts = [];
+    if (importedBookmarksCount > 0) subtitleParts.push(`${importedBookmarksCount} bookmarks`);
+    if (importedHistoryCount > 0) subtitleParts.push(`${importedHistoryCount} history items`);
+    if (importedCookiesCount > 0) subtitleParts.push(`${importedCookiesCount} cookies`);
     const subtitleMsg = totalCount > 0
-      ? `Successfully imported ${importedBookmarksCount} bookmarks and ${importedHistoryCount} history items!`
-      : `No bookmarks or history found to import.`;
+      ? `Successfully imported ${subtitleParts.join(', ')}!`
+      : `No matching data found to import.`;
     impWin.webContents.send('import-progress', {
       title: totalCount > 0 ? 'Import Completed' : 'Import Finished',
       subtitle: subtitleMsg,
@@ -5261,7 +5421,9 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
         browser: browserName,
         importedBookmarks: importedBookmarkNodes,
         importedBookmarksCount,
-        importedHistoryCount
+        importedHistoryCount,
+        importedCookiesCount,
+        skippedCookiesCount
       });
     });
   }
@@ -5272,6 +5434,8 @@ ipcMain.handle('import-browser-data', async (event, browserName) => {
     importedBookmarks: importedBookmarkNodes,
     importedBookmarksCount,
     importedHistoryCount,
+    importedCookiesCount,
+    skippedCookiesCount,
     importedCount: totalCount
   };
 });

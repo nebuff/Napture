@@ -1898,43 +1898,41 @@ function updateNavButtons(canGoBack, canGoForward) {
   forwardBtn.disabled = !canGoForward;
 }
 
+function getSnippetList() {
+  const core = (typeof window !== 'undefined' && window.NaptureSnippets) ? window.NaptureSnippets : null;
+  if (!core) return [];
+  return core.parseList(currentSettings ? currentSettings.snippets : null);
+}
+
+function resolveSnippetInput(input) {
+  const core = (typeof window !== 'undefined' && window.NaptureSnippets) ? window.NaptureSnippets : null;
+  if (!core) return null;
+  return core.resolve(input, getSnippetList());
+}
+
+function getSnippetSuggestions(query) {
+  const core = (typeof window !== 'undefined' && window.NaptureSnippets) ? window.NaptureSnippets : null;
+  if (!core) return [];
+  return core.suggestions(query, getSnippetList());
+}
+
+function navigateToQuery(query) {
+  const value = String(query || '').trim();
+  if (!value) return;
+  if (addressInput) addressInput.value = value;
+  handleAddressSubmit();
+}
+
 function handleAddressSubmit() {
   let url = addressInput.value.trim();
   if (!url) return;
 
-  // Check for Quick Site Snippets
-  let snippetsList = [];
-  if (currentSettings && currentSettings.snippets) {
-    try {
-      snippetsList = typeof currentSettings.snippets === 'string' ? JSON.parse(currentSettings.snippets) : currentSettings.snippets;
-    } catch (e) {}
-  }
-
-  if (Array.isArray(snippetsList) && snippetsList.length > 0) {
-    const cleanInput = url.split(' - ')[0].trim().toLowerCase();
-    const matched = snippetsList.find(s => {
-      if (!s || !s.snippet) return false;
-      const key = '.' + String(s.snippet).trim().replace(/^\./, '').toLowerCase();
-      return key === cleanInput;
-    });
-
-    if (matched && matched.url) {
-      let targetUrl = String(matched.url).trim();
-      if (targetUrl) {
-        if (!targetUrl.includes('://')) {
-          targetUrl = 'https://' + targetUrl;
-        }
-        const activeTab = tabs.find(t => t.id === activeTabId);
-        if (activeTab) {
-          activeTab.url = targetUrl;
-          if (window.naptureAPI && window.naptureAPI.navigate) {
-            window.naptureAPI.navigate(targetUrl);
-          }
-          hideAddressInput();
-          return;
-        }
-      }
-    }
+  // Quick Site Snippets: rewrite ".mail" (or ".mail - description") to its URL and
+  // keep going through the normal navigation flow so the tab, address bar, loading
+  // state and security badge all update exactly as they do for a typed URL.
+  const snippetTarget = resolveSnippetInput(url);
+  if (snippetTarget) {
+    url = snippetTarget;
   }
 
   const protocolPattern = /^[a-zA-Z0-9+-.]+:\/\//;
@@ -2230,31 +2228,12 @@ if (addressInput && addressSuggestions) {
     closeAllPopups('address-suggestions');
 
     // Check for matching Quick Site Snippets
-    if (val.startsWith('.')) {
-      let snippetsList = [];
-      if (currentSettings && currentSettings.snippets) {
-        try {
-          snippetsList = typeof currentSettings.snippets === 'string' ? JSON.parse(currentSettings.snippets) : currentSettings.snippets;
-        } catch (e) {}
-      }
-
-      if (Array.isArray(snippetsList) && snippetsList.length > 0) {
-        const valLower = val.toLowerCase();
-        const snippetMatches = [];
-        snippetsList.forEach(s => {
-          if (!s || !s.snippet) return;
-          const key = '.' + String(s.snippet).trim().replace(/^\./, '');
-          if (key.toLowerCase().startsWith(valLower)) {
-            const desc = s.description && String(s.description).trim() ? ' - ' + String(s.description).trim() : '';
-            snippetMatches.push(`${key}${desc}`);
-          }
-        });
-
-        if (snippetMatches.length > 0) {
-          currentAddressSuggestions = snippetMatches;
-          renderAddressSuggestions();
-          return;
-        }
+    if (val.charAt(0) === '.') {
+      const snippetMatches = getSnippetSuggestions(val);
+      if (snippetMatches.length > 0) {
+        currentAddressSuggestions = snippetMatches;
+        renderAddressSuggestions();
+        return;
       }
     }
 
