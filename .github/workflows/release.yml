@@ -5,7 +5,9 @@ name: Release Draft
 # by scripts/publish/state.json, which is the same draft the local
 # scripts/publish/*-build.sh scripts use.
 #
-#   1. ./scripts/publish/version.sh 0.23.0 --beta      (bumps, commits, pushes)
+#   1. ./scripts/publish/version.sh 0.23.0-beta.1     (bumps, commits, pushes)
+#      (a beta must carry the -beta suffix so package managers see a version
+#      distinct from the stable 0.23.0)
 #   2. Actions -> Release Draft -> Run workflow
 #   3. review and publish the draft on the releases page
 on:
