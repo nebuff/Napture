@@ -120,6 +120,14 @@ function validateToolbarLayout(layout, defaultLayout = null) {
   return sanitized;
 }
 
+function escapeHtmlText(value) {
+  return String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 function getDefaultSettings() {
   const isNeEnabled = typeof isNeProtocolSupported === 'function' ? isNeProtocolSupported() : true;
   return {
@@ -138,6 +146,8 @@ function getDefaultSettings() {
     safeBrowsing: 'standard',
     doNotTrack: false,
     httpsOnly: false,
+    adBlock: true,
+    customFilters: '',
 
     // 3. Search Engine
     searchEngine: 'duckduckgo',
@@ -426,6 +436,60 @@ function buildSettingsPage() {
       overflow: hidden;
       margin-bottom: 20px;
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .adblock-filters-summary {
+      cursor: pointer;
+      list-style: none;
+    }
+
+    .adblock-filters-summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .adblock-filters-chevron {
+      flex-shrink: 0;
+      color: var(--text-muted);
+      transition: transform 0.2s ease;
+    }
+
+    .adblock-filters-details[open] .adblock-filters-chevron {
+      transform: rotate(180deg);
+    }
+
+    .adblock-filters-body {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      padding: 0 20px 16px;
+    }
+
+    .adblock-filters-textarea {
+      width: 100%;
+      height: 140px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 12px;
+      line-height: 1.5;
+      background: var(--bg-input);
+      color: var(--text-primary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 10px;
+      resize: vertical;
+      box-sizing: border-box;
+      outline: none;
+    }
+
+    .adblock-filters-actions {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .adblock-filters-status {
+      font-size: 11px;
+      color: var(--text-muted);
     }
 
     .card-row {
@@ -1821,6 +1885,29 @@ function buildSettingsPage() {
             </div>
             <div class="card-row">
               <div class="row-info">
+                <div class="row-label">${t('adblock_label')}</div>
+                <div class="row-desc">${t('adblock_desc')}</div>
+              </div>
+              <label class="switch"><input type="checkbox" id="setting-adBlock" ${settings.adBlock ? 'checked' : ''}><span class="slider"></span></label>
+            </div>
+            <details class="adblock-filters-details">
+              <summary class="card-row adblock-filters-summary">
+                <div class="row-info">
+                  <div class="row-label">${t('adblock_custom_label')}</div>
+                  <div class="row-desc">${t('adblock_custom_desc')}</div>
+                </div>
+                <svg class="adblock-filters-chevron" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+              </summary>
+              <div class="adblock-filters-body">
+                <textarea id="setting-customFilters" spellcheck="false" placeholder="${t('adblock_custom_placeholder')}" class="adblock-filters-textarea">${escapeHtmlText(settings.customFilters || '')}</textarea>
+                <div class="adblock-filters-actions">
+                  <span id="custom-filters-status" class="adblock-filters-status"></span>
+                  <button class="btn btn-primary" id="btn-save-custom-filters">${t('adblock_custom_save')}</button>
+                </div>
+              </div>
+            </details>
+            <div class="card-row">
+              <div class="row-info">
                 <div class="row-label">${t('dnt_label')}</div>
                 <div class="row-desc">${t('dnt_desc')}</div>
               </div>
@@ -2381,6 +2468,7 @@ function buildSettingsPage() {
       'setting-blockCookies': 'blockCookies',
       'setting-doNotTrack': 'doNotTrack',
       'setting-httpsOnly': 'httpsOnly',
+      'setting-adBlock': 'adBlock',
       'setting-secureDns': 'secureDns',
       'setting-askSaveLocation': 'askSaveLocation',
       'setting-language': 'language',
@@ -2435,6 +2523,20 @@ function buildSettingsPage() {
         el.addEventListener('input', handleUpdate);
       }
     });
+
+    // --- Custom ad-block filter rules ---
+    const customFiltersInput = document.getElementById('setting-customFilters');
+    const saveCustomFiltersBtn = document.getElementById('btn-save-custom-filters');
+    if (customFiltersInput && saveCustomFiltersBtn) {
+      saveCustomFiltersBtn.addEventListener('click', () => {
+        const status = document.getElementById('custom-filters-status');
+        Promise.resolve(persistSetting('customFilters', customFiltersInput.value)).then(() => {
+          if (!status) return;
+          status.textContent = ${JSON.stringify(t('adblock_custom_saved'))};
+          setTimeout(() => { status.textContent = ''; }, 2500);
+        });
+      });
+    }
 
     // --- Snippets UI Management ---
     let currentSnippets = [];

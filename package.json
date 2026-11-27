@@ -219,6 +219,7 @@
     }
   },
   "dependencies": {
+    "@ghostery/adblocker-electron": "^2.20.3",
     "adm-zip": "^0.6.1",
     "better-sqlite3": "^13.2.0",
     "compression": "^1.8.2",

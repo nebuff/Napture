@@ -492,6 +492,8 @@ function getChangedUserSettings() {
     blockCookies: 'incognito',
     doNotTrack: false,
     httpsOnly: false,
+    adBlock: true,
+    customFilters: '',
     secureDns: 'cloudflare',
     startupMode: 'restore_all',
     askSaveLocation: false,

@@ -123,6 +123,74 @@ try {
   console.error('Failed to install extension popup chrome shim:', e && e.message);
 }
 
+// Extension popups follow the browser's Default zoom setting. Chromium restores
+// the extension origin's previous page zoom on every navigation, which overrides
+// it, so scale the popup document instead of using the page zoom.
+let popupZoom = 1;
+try {
+  const factor = ipcRenderer.sendSync('extensions:popup-zoom');
+  if (typeof factor === 'number' && factor > 0) popupZoom = factor;
+} catch (e) {}
+
+function applyPopupZoom() {
+  try {
+    if (!document.documentElement || Math.abs(popupZoom - 1) < 0.001) return;
+    document.documentElement.style.setProperty('zoom', String(popupZoom), 'important');
+  } catch (e) {}
+}
+
+applyPopupZoom();
+
+// Chrome sizes extension popups to their content (max 800x600) instead of a
+// fixed window. Report the laid-out size so the main process can fit the window.
+let lastReportedPopupSize = null;
+
+function reportPopupSize() {
+  try {
+    const body = document.body;
+    if (!body) return;
+    // Use layout metrics only (not getBoundingClientRect, which includes the
+    // document zoom applied above) so the size is independent of the zoom.
+    const width = Math.ceil(Math.max(body.offsetWidth || 0, body.scrollWidth || 0));
+    const height = Math.ceil(Math.max(body.offsetHeight || 0, body.scrollHeight || 0));
+    if (!width || !height) return;
+    if (lastReportedPopupSize &&
+        lastReportedPopupSize.width === width &&
+        lastReportedPopupSize.height === height) {
+      return;
+    }
+    lastReportedPopupSize = { width, height };
+    ipcRenderer.send('extensions:popup-resize', { width, height });
+  } catch (e) {}
+}
+
+function watchPopupSize() {
+  applyPopupZoom();
+  reportPopupSize();
+  try {
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver(() => reportPopupSize());
+      observer.observe(document.body);
+      if (document.documentElement) observer.observe(document.documentElement);
+    }
+  } catch (e) {}
+  try {
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => reportPopupSize()).catch(() => {});
+    }
+  } catch (e) {}
+  [50, 150, 400, 1000, 2000].forEach((delay) => setTimeout(reportPopupSize, delay));
+}
+
+try {
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', watchPopupSize, { once: true });
+    window.addEventListener('load', reportPopupSize, { once: true });
+  } else {
+    watchPopupSize();
+  }
+} catch (e) {}
+
 try {
   const attach = () => document.addEventListener('click', handleExpandClick, true);
   if (document.readyState === 'loading') {

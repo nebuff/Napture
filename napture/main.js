@@ -4197,6 +4197,7 @@ ipcMain.on('open-about-window', () => {
 });
 
 let settingsWindow = null;
+let adblockCustomFilterReloader = null;
 
 function getSettingsHtml() {
   return buildSettingsPage();
@@ -4532,6 +4533,9 @@ ipcMain.handle('save-setting', (event, { key, value }) => {
     setSetting('performanceMode', derived);
     applyPerformanceMode(derived);
   }
+  if (key === 'customFilters' && typeof adblockCustomFilterReloader === 'function') {
+    adblockCustomFilterReloader(value);
+  }
   if (key === 'spellCheck' && session.defaultSession) {
     try { session.defaultSession.setSpellCheckerEnabled(Boolean(value)); } catch (e) {}
   }
@@ -4600,6 +4604,83 @@ function broadcastExtensionsChanged() {
 let extensionPopupWindow = null;
 let extensionPopupId = null;
 let extensionPopupParent = null;
+let extensionPopupAnchorRect = null;
+let extensionPopupZoomFactor = 1;
+let extensionPopupAppliedSize = null;
+
+// Chrome sizes extension popups to their content, capped at 800x600.
+const EXTENSION_POPUP_MIN_HEIGHT = 80;
+const EXTENSION_POPUP_MAX_WIDTH = 800;
+const EXTENSION_POPUP_MAX_HEIGHT = 600;
+const EXTENSION_POPUP_DEFAULT_WIDTH = 400;
+
+// Extension popups follow the browser's Default zoom so their UI is scaled like
+// the pages next to them (zoom already accounts for the display scale factor).
+function getExtensionPopupZoom() {
+  try {
+    const factor = parseInt(require('./db/history').getSetting('defaultZoom', '100'), 10) / 100;
+    if (!isNaN(factor) && factor >= 0.5 && factor <= 3) return factor;
+  } catch (e) {}
+  return 1;
+}
+
+function positionExtensionPopup(popup, parentWin, rect, width, height) {
+  if (!popup || popup.isDestroyed() || !parentWin || parentWin.isDestroyed()) return;
+  const anchor = rect || { left: 0, bottom: 0 };
+  const bounds = parentWin.getContentBounds();
+  const maxX = bounds.x + Math.max(0, bounds.width - width - 12);
+  const maxY = bounds.y + Math.max(0, bounds.height - height - 12);
+  const x = Math.round(Math.min(Math.max(bounds.x + 8, bounds.x + (anchor.left || 0)), maxX));
+  const y = Math.round(Math.min(bounds.y + (anchor.bottom || 0) + 6, maxY));
+  popup.setBounds({ x, y, width, height });
+}
+
+function resizeExtensionPopup(width, height) {
+  const popup = extensionPopupWindow;
+  if (!popup || popup.isDestroyed()) return;
+  const next = { width: Math.round(width), height: Math.round(height) };
+  if (extensionPopupAppliedSize &&
+      extensionPopupAppliedSize.width === next.width &&
+      extensionPopupAppliedSize.height === next.height) {
+    return;
+  }
+  extensionPopupAppliedSize = next;
+  positionExtensionPopup(popup, extensionPopupParent, extensionPopupAnchorRect, next.width, next.height);
+}
+
+// The popup preload reports its laid-out size in unscaled CSS pixels. The window
+// keeps the popup's design width (growing only when the content is wider) and
+// shrinks in height so short popups do not leave a large empty window.
+function fitExtensionPopupToContent(measurement) {
+  const cssWidth = Number(measurement && measurement.width) || 0;
+  const cssHeight = Number(measurement && measurement.height) || 0;
+  if (!(cssWidth > 0) || !(cssHeight > 0)) return;
+  const zoom = extensionPopupZoomFactor || 1;
+  const maxWidth = Math.round(EXTENSION_POPUP_MAX_WIDTH * zoom);
+  const maxHeight = Math.round(EXTENSION_POPUP_MAX_HEIGHT * zoom);
+  const minHeight = Math.min(Math.round(EXTENSION_POPUP_MIN_HEIGHT * zoom), maxHeight);
+  const cssTargetWidth = Math.min(
+    Math.max(cssWidth, EXTENSION_POPUP_DEFAULT_WIDTH),
+    EXTENSION_POPUP_MAX_WIDTH
+  );
+  const width = Math.round(cssTargetWidth * zoom);
+  const height = Math.min(Math.max(Math.round(cssHeight * zoom), minHeight), maxHeight);
+  resizeExtensionPopup(width, height);
+}
+
+ipcMain.on('extensions:popup-resize', (event, measurement) => {
+  const popup = extensionPopupWindow;
+  if (!popup || popup.isDestroyed()) return;
+  if (popup.webContents !== event.sender) return;
+  fitExtensionPopupToContent(measurement);
+});
+
+ipcMain.on('extensions:popup-zoom', (event) => {
+  const popup = extensionPopupWindow;
+  event.returnValue = popup && !popup.isDestroyed() && popup.webContents === event.sender
+    ? extensionPopupZoomFactor
+    : 1;
+});
 
 function openExtensionPopup(event, payload) {
   const extensionId = payload && payload.extensionId;
@@ -4614,8 +4695,9 @@ function openExtensionPopup(event, payload) {
     if (wasSame) return;
   }
 
-  const width = 400;
-  const height = 600;
+  const zoom = getExtensionPopupZoom();
+  const width = Math.round(EXTENSION_POPUP_DEFAULT_WIDTH * zoom);
+  const height = Math.round(EXTENSION_POPUP_MAX_HEIGHT * zoom);
   const bounds = parentWin.getContentBounds();
   const maxX = bounds.x + Math.max(0, bounds.width - width - 12);
   const maxY = bounds.y + Math.max(0, bounds.height - height - 12);
@@ -4628,6 +4710,7 @@ function openExtensionPopup(event, payload) {
     resizable: false,
     show: false,
     skipTaskbar: true,
+    useContentSize: true,
     x,
     y,
     width,
@@ -4644,9 +4727,14 @@ function openExtensionPopup(event, payload) {
   extensionPopupWindow = popup;
   extensionPopupId = extensionId;
   extensionPopupParent = parentWin;
+  extensionPopupAnchorRect = rect;
+  extensionPopupZoomFactor = zoom;
+  extensionPopupAppliedSize = { width, height };
 
   popup.loadURL(popupUrl);
-  popup.once('ready-to-show', () => { if (!popup.isDestroyed()) popup.show(); });
+  popup.once('ready-to-show', () => {
+    if (!popup.isDestroyed()) popup.show();
+  });
   popup.on('blur', () => { if (!popup.isDestroyed()) popup.close(); });
   popup.on('closed', () => {
     try { if (popup.webContents && popup.webContents.debugger.isAttached()) popup.webContents.debugger.detach(); } catch (e) {}
@@ -4654,6 +4742,9 @@ function openExtensionPopup(event, payload) {
       extensionPopupWindow = null;
       extensionPopupId = null;
       extensionPopupParent = null;
+      extensionPopupAnchorRect = null;
+      extensionPopupZoomFactor = 1;
+      extensionPopupAppliedSize = null;
     }
   });
 }
@@ -5803,6 +5894,8 @@ function getDefaultSettings() {
     blockCookies: 'incognito',
     doNotTrack: false,
     httpsOnly: false,
+    adBlock: true,
+    customFilters: '',
     startupMode: 'restore_all',
     downloadPath: app.getPath('downloads'),
     askSaveLocation: false,
@@ -6784,11 +6877,120 @@ app.whenReady().then(async () => {
     'moatads.com'
   ];
 
+  // Electron has no chrome.declarativeNetRequest, so MV3 ad blockers installed as
+  // extensions (uBlock, uBlock Origin Lite, ...) load fine but cannot block anything.
+  // Run uBlock/EasyList-compatible filter lists here instead.
+  let adBlocker = null;
+  let customFiltersEngine = null;
+  let adblockerLib = null;
+  let electronDetailsToRequest = null;
+
+  // User rules from Settings → Privacy and Security, parsed in uBlock "My filters" syntax.
+  function rebuildCustomFiltersEngine(text) {
+    if (!adblockerLib) return;
+    const trimmed = String(text || '').trim();
+    if (!trimmed) {
+      customFiltersEngine = null;
+      return;
+    }
+    try {
+      customFiltersEngine = adblockerLib.FiltersEngine.parse(trimmed);
+    } catch (err) {
+      customFiltersEngine = null;
+      console.error('Custom filter rules failed to parse:', err && err.message);
+    }
+  }
+  adblockCustomFilterReloader = rebuildCustomFiltersEngine;
+
+  function injectCustomCosmeticFilters(event, url, msg) {
+    if (!customFiltersEngine || !event || !event.sender || event.sender.isDestroyed()) return;
+    try {
+      let hostname = '';
+      let domain = '';
+      try {
+        const parsed = new URL(url);
+        hostname = parsed.hostname || '';
+        domain = (require('tldts-experimental').parse(url).domain) || hostname.replace(/^www\./, '');
+      } catch (e) {}
+      const isFirstRun = msg === undefined;
+      const { active, styles } = customFiltersEngine.getCosmeticsFilters({
+        url,
+        hostname,
+        domain,
+        classes: msg && msg.classes,
+        hrefs: msg && msg.hrefs,
+        ids: msg && msg.ids,
+        getBaseRules: isFirstRun,
+        getInjectionRules: false,
+        getExtendedRules: false,
+        getRulesFromHostname: isFirstRun,
+        getRulesFromDOM: !isFirstRun
+      });
+      if (active !== false && styles) {
+        event.sender.insertCSS(styles, { cssOrigin: 'user' });
+      }
+    } catch (e) {}
+  }
+
+  try {
+    adblockerLib = require('@ghostery/adblocker-electron');
+    electronDetailsToRequest = adblockerLib.fromElectronDetails;
+    rebuildCustomFiltersEngine(getSetting('customFilters', ''));
+    adblockerLib.ElectronBlocker.fromPrebuiltAdsAndTracking(fetch, {
+      path: path.join(app.getPath('userData'), 'adblock-engine.bin'),
+      read: fs.promises.readFile,
+      write: fs.promises.writeFile
+    }).then((blocker) => {
+      adBlocker = blocker;
+      try {
+        // Cosmetic filtering (hiding ad containers) needs the library's preload in
+        // each frame plus its two IPC handlers; it does not touch webRequest.
+        const preloadPath = require.resolve('@ghostery/adblocker-electron-preload');
+        session.defaultSession.registerPreloadScript({ type: 'frame', filePath: preloadPath });
+        ipcMain.handle('@ghostery/adblocker/inject-cosmetic-filters', (event, url, msg) => {
+          if (!getSetting('adBlock', true)) return { active: false };
+          injectCustomCosmeticFilters(event, url, msg);
+          return adBlocker.onInjectCosmeticFilters(event, url, msg);
+        });
+        ipcMain.handle('@ghostery/adblocker/is-mutation-observer-enabled', () => getSetting('adBlock', true));
+      } catch (err) {
+        console.error('Cosmetic filtering unavailable:', err && err.message);
+      }
+      console.log('Ad blocker ready (filter lists + cosmetic filtering active)');
+    }).catch((err) => {
+      console.error('Ad blocker lists failed to load:', err && err.message);
+    });
+  } catch (err) {
+    console.error('Ad blocker unavailable:', err && err.message);
+  }
+
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
-    const lowerUrl = details.url.toLowerCase();
-    for (let i = 0; i < adTrackerPatterns.length; i++) {
-      if (lowerUrl.includes(adTrackerPatterns[i])) {
-        return callback({ cancel: true });
+    const adBlockEnabled = getSetting('adBlock', true);
+    let allowlisted = false;
+
+    if (adBlockEnabled && details.resourceType !== 'mainFrame' && customFiltersEngine && electronDetailsToRequest) {
+      try {
+        const custom = customFiltersEngine.match(electronDetailsToRequest(details));
+        if (custom.redirect) return callback({ redirectURL: custom.redirect.dataUrl });
+        if (custom.match) return callback({ cancel: true });
+        allowlisted = Boolean(custom.exception);
+      } catch (e) {}
+    }
+
+    if (adBlockEnabled && !allowlisted && adBlocker && details.resourceType !== 'mainFrame') {
+      try {
+        const { match, redirect } = adBlocker.match(electronDetailsToRequest(details));
+        if (redirect) return callback({ redirectURL: redirect.dataUrl });
+        if (match) return callback({ cancel: true });
+      } catch (e) {}
+    }
+
+    if (adBlockEnabled && !allowlisted) {
+      const lowerUrl = details.url.toLowerCase();
+      for (let i = 0; i < adTrackerPatterns.length; i++) {
+        if (lowerUrl.includes(adTrackerPatterns[i])) {
+          return callback({ cancel: true });
+        }
       }
     }
 
