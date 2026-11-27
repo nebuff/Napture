@@ -1,0 +1,102 @@
+name: Release Draft
+
+# Manual only. Builds the installers on GitHub's runners (so no local toolchain
+# is needed for macOS or Windows) and uploads them into the draft release named
+# by scripts/publish/state.json, which is the same draft the local
+# scripts/publish/*-build.sh scripts use.
+#
+#   1. ./scripts/publish/version.sh 0.23.0 --beta      (bumps, commits, pushes)
+#   2. Actions -> Release Draft -> Run workflow
+#   3. review and publish the draft on the releases page
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which platforms to build
+        type: choice
+        default: all
+        options:
+          - all
+          - windows
+          - linux
+          - macos
+      force:
+        description: Upload into the release even if it is already published
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# Two dispatches uploading into the same draft would race; queue them instead.
+concurrency:
+  group: release-draft
+  cancel-in-progress: false
+
+env:
+  ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  ALLOW_PUBLISHED: ${{ inputs.force && '1' || '0' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+
+  # Creates the draft once, so the three platform jobs only ever upload.
+  prepare:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bash scripts/publish/ci-publish.sh --ensure-only
+
+  build-windows:
+    needs: prepare
+    if: inputs.platforms == 'all' || inputs.platforms == 'windows'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm run dist:win
+      - run: bash scripts/publish/ci-publish.sh windows
+
+  build-linux:
+    needs: prepare
+    if: inputs.platforms == 'all' || inputs.platforms == 'linux'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      # rpmbuild is what electron-builder's fpm uses for the .rpm target.
+      - run: sudo apt-get update && sudo apt-get install -y rpm
+      - run: npm run dist:linux
+      - run: bash scripts/publish/ci-publish.sh linux
+
+  build-macos:
+    needs: prepare
+    if: inputs.platforms == 'all' || inputs.platforms == 'macos'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci --no-audit --no-fund
+      - run: npm run dist:mac
+      - run: bash scripts/publish/ci-publish.sh macos
