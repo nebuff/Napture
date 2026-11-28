@@ -18,6 +18,7 @@ if (typeof window !== 'undefined' && !window.naptureAPI) {
     onTabLoadingState: () => () => {},
     onTabNavigated: () => () => {},
     onTabTitleUpdated: () => () => {},
+    onTabSlept: () => () => {},
     onTabFaviconUpdated: () => () => {},
     onOpenUrlInNewTab: () => () => {},
     onTriggerResize: () => () => {},
@@ -1534,11 +1535,17 @@ function switchTab(tabId) {
   if (isToolbarCustomizing) return;
   activeTabId = tabId;
   _lastSentBounds = null;
-  if (!updateActiveTabHighlight()) renderTabs();
-  
+
   const activeTab = tabs.find(t => t.id === activeTabId);
   if (activeTab) {
+    // Activation hydrates a slept tab in the main process; clear the indicator
+    // immediately so the click feels responsive.
     activeTab.isSleeping = false;
+    updateTabSleepState(activeTab);
+  }
+  if (!updateActiveTabHighlight()) renderTabs();
+
+  if (activeTab) {
     updateAddressBarDisplay(activeTab.url, activeTab.title);
     if (document.activeElement !== addressInput) {
       hideAddressInput();
@@ -1679,6 +1686,50 @@ function updateActiveTabHighlight() {
   return true;
 }
 
+function getTabAriaLabel(tab) {
+  const label = (tab && tab.title) || 'Tab';
+  return tab && tab.isSleeping ? `${label} (sleeping)` : label;
+}
+
+const SLEEP_TAB_ICON = '<svg class="tab-sleep-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+
+function renderTabIcon(tab, iconEl) {
+  if (!iconEl) return;
+
+  if (tab.isSleeping) {
+    iconEl.innerHTML = SLEEP_TAB_ICON;
+    return;
+  }
+
+  if (tab.isLoading) {
+    iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
+  } else if (tab.favicon) {
+    const img = document.createElement('img');
+    img.src = tab.favicon;
+    img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
+    iconEl.innerHTML = '';
+    iconEl.appendChild(img);
+  } else {
+    iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
+  }
+}
+
+function updateTabSleepState(tab) {
+  if (!tabsContainer || !tab) return false;
+  const tabEl = tabsContainer.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+  if (!tabEl) return false;
+
+  tabEl.classList.toggle('is-sleeping', !!tab.isSleeping);
+  tabEl.title = tab.isSleeping ? 'Sleeping tab (click to wake)' : '';
+  tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
+
+  const titleEl = tabEl.querySelector('.tab-title');
+  if (titleEl && tab.title) titleEl.textContent = tab.title;
+
+  renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
+  return true;
+}
+
 function renderTabs() {
   tabsContainer.innerHTML = '';
 
@@ -1704,10 +1755,12 @@ function renderTabs() {
     regularTabs.forEach(tab => {
       const tabEl = document.createElement('div');
       tabEl.className = `tab ${tab.id === activeTabId ? 'active' : ''}`;
+      if (tab.isSleeping) tabEl.classList.add('is-sleeping');
       tabEl.dataset.tabId = tab.id;
       tabEl.draggable = true;
       tabEl.setAttribute('role', 'tab');
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
+      if (tab.isSleeping) tabEl.title = 'Sleeping tab (click to wake)';
 
       // Draggable event listeners
       tabEl.addEventListener('dragstart', (e) => {
@@ -1843,22 +1896,10 @@ function renderTabs() {
         }
       });
 
-      // Favicon or Spinner
+      // Favicon, loading spinner, or sleep indicator
       const iconEl = document.createElement('div');
       iconEl.className = 'tab-favicon';
-      
-      if (tab.isLoading) {
-        iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
-      } else if (tab.favicon) {
-        const img = document.createElement('img');
-        img.src = tab.favicon;
-        img.onerror = () => {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        };
-        iconEl.appendChild(img);
-      } else {
-        iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-      }
+      renderTabIcon(tab, iconEl);
 
       const titleEl = document.createElement('div');
       titleEl.className = 'tab-title';
@@ -2468,18 +2509,7 @@ window.naptureAPI.onTabLoadingState(({ tabId, isLoading }) => {
         tabLoadingWatchdogs.delete(tabId);
         const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
         if (tabEl) {
-          const iconEl = tabEl.querySelector('.tab-favicon');
-          if (iconEl) {
-            if (tab.favicon) {
-              const img = document.createElement('img');
-              img.src = tab.favicon;
-              img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-              iconEl.innerHTML = '';
-              iconEl.appendChild(img);
-            } else {
-              iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-            }
-          }
+          renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
         }
         if (tabId === activeTabId) {
           updatePageLoadingState(false);
@@ -2490,20 +2520,7 @@ window.naptureAPI.onTabLoadingState(({ tabId, isLoading }) => {
     // Bolt: Surgical DOM update to avoid full re-render
     const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
     if (tabEl) {
-      const iconEl = tabEl.querySelector('.tab-favicon');
-      if (iconEl) {
-        if (isLoading) {
-          iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
-        } else if (tab.favicon) {
-          const img = document.createElement('img');
-          img.src = tab.favicon;
-          img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-          iconEl.innerHTML = '';
-          iconEl.appendChild(img);
-        } else {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        }
-      }
+      renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
     } else {
       renderTabs();
     }
@@ -2544,7 +2561,7 @@ window.naptureAPI.onTabNavigated(({ tabId, url, title, canGoBack, canGoForward }
     if (tabEl && !isWelcomeUrl(tab.url)) {
       const titleEl = tabEl.querySelector('.tab-title');
       if (titleEl && tab.title) titleEl.textContent = tab.title;
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
     } else {
       renderTabs();
     }
@@ -2577,7 +2594,7 @@ window.naptureAPI.onTabTitleUpdated(({ tabId, title }) => {
     if (tabEl) {
       const titleEl = tabEl.querySelector('.tab-title');
       if (titleEl && tab.title) titleEl.textContent = tab.title;
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
     } else {
       renderTabs();
     }
@@ -2590,6 +2607,22 @@ window.naptureAPI.onTabTitleUpdated(({ tabId, title }) => {
   }
 });
 
+window.naptureAPI.onTabSlept(({ tabId, url, title }) => {
+  const tab = tabs.find(t => t.id === tabId);
+  // A race can deliver the notification after the user has already activated
+  // the tab; never show a sleeping indicator on the active tab.
+  if (!tab || tabId === activeTabId) return;
+
+  tab.isSleeping = true;
+  if (url && url !== 'about:blank') tab.url = url;
+  if (title) tab.title = title;
+
+  if (!updateTabSleepState(tab)) {
+    renderTabs();
+  }
+  scheduleSessionSave();
+});
+
 window.naptureAPI.onTabFaviconUpdated(({ tabId, favicon }) => {
   const tab = tabs.find(t => t.id === tabId);
   if (tab) {
@@ -2598,18 +2631,7 @@ window.naptureAPI.onTabFaviconUpdated(({ tabId, favicon }) => {
     // Bolt: Surgical DOM update to avoid full re-render
     const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
     if (tabEl) {
-      const iconEl = tabEl.querySelector('.tab-favicon');
-      if (iconEl && !tab.isLoading) {
-        if (favicon) {
-          const img = document.createElement('img');
-          img.src = favicon;
-          img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-          iconEl.innerHTML = '';
-          iconEl.appendChild(img);
-        } else {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        }
-      }
+      renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
     } else {
       renderTabs();
     }

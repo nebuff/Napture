@@ -6759,6 +6759,16 @@ function getTabSleeperRuntime() {
     rankTabsForDiscard,
     defaultMemoryTargetMB: DEFAULT_MEMORY_TARGET_MB,
     getActiveStreamingTabId: () => activeStreamingTabId,
+    notifyTabSlept: (tabId, info) => {
+      const win = getWindowByTabId(tabId);
+      if (win && !win.isDestroyed() && win.webContents && !win.webContents.isDestroyed()) {
+        win.webContents.send('tab-slept', {
+          tabId,
+          url: info && info.url,
+          title: info && info.title
+        });
+      }
+    },
     clearMediaForTab: (tabId) => {
       if (cachedMediaInfo && cachedMediaInfo.tabId === tabId) cachedMediaInfo = null;
       if (lastActiveMediaTabId === tabId) lastActiveMediaTabId = null;

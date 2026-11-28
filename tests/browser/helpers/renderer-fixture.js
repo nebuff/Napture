@@ -19,6 +19,7 @@ const BODY_CONTENT = readIndexBody();
 const settingHandlers = [];
 const shortcutHandlers = [];
 const tabContextMenuHandlers = [];
+const tabSleptHandlers = [];
 
 function installBrowserStubs() {
   // jsdom has no layout/observer/timer machinery; the renderer expects them.
@@ -35,6 +36,7 @@ const SUBSCRIPTION_NAMES = [
   'onTabLoadingState',
   'onTabNavigated',
   'onTabTitleUpdated',
+  'onTabSlept',
   'onTabFaviconUpdated',
   'onOpenUrlInNewTab',
   'onTriggerResize',
@@ -68,11 +70,13 @@ function installApiMock(options = {}) {
   settingHandlers.length = 0;
   shortcutHandlers.length = 0;
   tabContextMenuHandlers.length = 0;
+  tabSleptHandlers.length = 0;
   const overrides = {
     getSettings: () => Promise.resolve({}),
     onSettingChanged: (cb) => { settingHandlers.push(cb); return () => {}; },
     onShortcutAction: (cb) => { shortcutHandlers.push(cb); return () => {}; },
     onTabContextMenuAction: (cb) => { tabContextMenuHandlers.push(cb); return () => {}; },
+    onTabSlept: (cb) => { tabSleptHandlers.push(cb); return () => {}; },
     loadSession: () => Promise.resolve([]),
     extensionsList: () => Promise.resolve([]),
     getRecentDownloads: () => Promise.resolve([]),
@@ -128,9 +132,16 @@ function sendTabContextMenuAction(action, payload) {
   for (const handler of tabContextMenuHandlers) handler(action, payload);
 }
 
+// Pushes the sleep notification the main-process memory saver emits after it
+// writes a tab archive.
+function sendTabSlept(data) {
+  for (const handler of tabSleptHandlers) handler(data);
+}
+
 module.exports = {
   loadRendererFixture,
   setRendererSetting,
   sendShortcutAction,
-  sendTabContextMenuAction
+  sendTabContextMenuAction,
+  sendTabSlept
 };

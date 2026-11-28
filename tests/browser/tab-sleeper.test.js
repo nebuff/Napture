@@ -119,6 +119,9 @@ function setupHarness({ tabs, activeTabId, pinnedIds = [], settings = {}, metric
     defaultMemoryTargetMB: DEFAULT_MEMORY_TARGET_MB,
     getActiveStreamingTabId: () => null,
     clearMediaForTab: jest.fn(),
+    notifyTabSlept: jest.fn((tabId, info) => {
+      win.webContents.send('tab-slept', { tabId, url: info.url, title: info.title });
+    }),
     logger: { error: jest.fn() }
   };
 
@@ -172,6 +175,15 @@ describe('tab-sleeper integration', () => {
       title: 'Old Page'
     });
     expect(harness.context.clearMediaForTab).toHaveBeenCalledWith('old');
+    expect(harness.context.notifyTabSlept).toHaveBeenCalledWith('old', {
+      url: 'https://old.test',
+      title: 'Old Page'
+    });
+    expect(harness.win.webContents.send).toHaveBeenCalledWith('tab-slept', {
+      tabId: 'old',
+      url: 'https://old.test',
+      title: 'Old Page'
+    });
     expect(harness.win.contentView.removeChildView).toHaveBeenCalledWith(oldView);
 
     expect(activeView.webContents.destroy).not.toHaveBeenCalled();
@@ -261,6 +273,7 @@ describe('tab-sleeper integration', () => {
     expect(harness.tabViews.has('background')).toBe(true);
     expect(harness.state.sleptTabs.has('background')).toBe(false);
     expect(view._isArchiving).toBe(false);
+    expect(harness.context.notifyTabSlept).not.toHaveBeenCalled();
   });
 
   test('restores back/forward history, scroll position, and removes the archive on wake', async () => {

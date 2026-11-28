@@ -134,7 +134,8 @@ function sleepTabToDisk(context, win, state, tabId, view) {
     getWindowByTabId,
     getWindowState,
     getActiveStreamingTabId,
-    clearMediaForTab
+    clearMediaForTab,
+    notifyTabSlept
   } = context;
 
   if (!view || !view.webContents || view.webContents.isDestroyed() || view._isArchiving) return Promise.resolve();
@@ -192,6 +193,12 @@ function sleepTabToDisk(context, win, state, tabId, view) {
     }
     currentState.sleptTabs.add(tabId);
     currentState.sleepingTabInfo.set(tabId, { url: payload.url, title: payload.title });
+
+    // Let the chrome renderer show its sleep indicator before the renderer
+    // process for this tab is torn down.
+    if (typeof notifyTabSlept === 'function') {
+      try { notifyTabSlept(tabId, { url: payload.url, title: payload.title }); } catch (e) {}
+    }
 
     if (typeof clearMediaForTab === 'function') {
       clearMediaForTab(tabId);

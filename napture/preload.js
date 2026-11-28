@@ -86,6 +86,11 @@ contextBridge.exposeInMainWorld('naptureAPI', {
     ipcRenderer.on('tab-title-updated', subscription);
     return () => ipcRenderer.removeListener('tab-title-updated', subscription);
   },
+  onTabSlept: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('tab-slept', subscription);
+    return () => ipcRenderer.removeListener('tab-slept', subscription);
+  },
   onTabFaviconUpdated: (callback) => {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on('tab-favicon-updated', subscription);
