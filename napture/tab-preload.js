@@ -22,7 +22,12 @@ const isInternalPage = () => {
 if (isInternalPage()) {
   try {
     contextBridge.exposeInMainWorld('naptureAPI', {
-      createTab: (tabId, url) => ipcRenderer.send('create-tab', { tabId, url }),
+      createTab: (tabId, url, options) => ipcRenderer.send('create-tab', {
+        tabId,
+        url,
+        defer: !!(options && options.defer),
+        title: options && options.title
+      }),
       switchTab: (payload) => ipcRenderer.send('switch-tab', payload),
       toggleMuteTab: (tabId) => ipcRenderer.send('toggle-mute-tab', tabId),
       closeTab: (tabId) => ipcRenderer.send('close-tab', tabId),

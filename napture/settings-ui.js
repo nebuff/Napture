@@ -171,8 +171,8 @@ function getDefaultSettings() {
     language: 'en-US',
 
     // 8. System & Performance
-    memorySaver: false,
-    memoryTarget: 700,
+    memorySaver: true,
+    memoryTarget: 1500,
     batterySaver: false,
     performanceMode: 'balanced',
     hardwareAcceleration: true,
@@ -2003,18 +2003,18 @@ function buildSettingsPage() {
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Memory Saver <span class="alpha-badge">Alpha</span></div>
-                <div class="row-desc">Free up system memory by unbinding unused background tabs</div>
+                <div class="row-desc">Sleep unused background tabs and free their memory. Tabs restore with their back/forward history and scroll position.</div>
               </div>
               <label class="switch"><input type="checkbox" id="setting-memorySaver" ${settings.memorySaver ? 'checked' : ''}><span class="slider"></span></label>
             </div>
             <div class="card-row">
               <div class="row-info">
                 <div class="row-label">Target Memory Usage (MB)</div>
-                <div class="row-desc">Control the maximum memory footprint before tabs are suspended</div>
+                <div class="row-desc">Sleep tabs sooner when Napture is using more than this much memory</div>
               </div>
               <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-                <input type="range" id="setting-memoryTarget" min="200" max="5000" step="100" value="${settings.memoryTarget || 700}" ${!settings.memorySaver ? 'disabled' : ''} style="flex: 1;">
-                <span id="memoryTargetDisplay" style="min-width: 60px; text-align: right; font-size: 0.9rem; color: var(--text-secondary);">${settings.memoryTarget || 700} MB</span>
+                <input type="range" id="setting-memoryTarget" min="500" max="5000" step="100" value="${settings.memoryTarget || 1500}" ${!settings.memorySaver ? 'disabled' : ''} style="flex: 1;">
+                <span id="memoryTargetDisplay" style="min-width: 60px; text-align: right; font-size: 0.9rem; color: var(--text-secondary);">${settings.memoryTarget || 1500} MB</span>
               </div>
             </div>
             <div class="card-row">

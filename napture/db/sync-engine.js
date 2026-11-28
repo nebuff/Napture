@@ -500,8 +500,8 @@ function getChangedUserSettings() {
     language: 'en-US',
     spellCheck: true,
     offerTranslate: true,
-    memorySaver: false,
-    memoryTarget: 700,
+    memorySaver: true,
+    memoryTarget: 1500,
     batterySaver: false,
     performanceMode: 'balanced',
     hardwareAcceleration: true

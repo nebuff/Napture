@@ -8,6 +8,13 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { unwrapRedirectUrl, isAuthOrSensitiveUrl, isBlurBackgroundEnabled } = require('./shared-utils');
+const {
+  DEFAULT_MEMORY_TARGET_MB,
+  getMemoryTargetBytes,
+  classifyMemoryPressure,
+  rankTabsForDiscard
+} = require('./memory-manager');
+const tabSleeper = require('./tab-sleeper');
 const { initTelemetry } = require('./src/telemetry/telemetryClient');
 
 // Isolate user data and single-instance locks in development to prevent clobbering or killing regular running Napture instances
@@ -61,6 +68,7 @@ function hideSuggestionsView(win) {
     if (win.contentView && win.contentView.children.includes(state.suggestionsView)) {
       win.contentView.removeChildView(state.suggestionsView);
     }
+    scheduleOverlayTeardown(win, state, 'suggestions');
   }
 }
 
@@ -69,17 +77,21 @@ function hideContextMenu(win) {
   if (!win) return;
   const state = getWindowState(win);
   if (state && state.contextMenuView) {
+    const wasVisible = !!state.isContextMenuVisible;
+    state.isContextMenuVisible = false;
+    state.pendingContextMenu = null;
     try {
       state.contextMenuView.setBounds({ x: 0, y: 0, width: 0, height: 0 });
       if (typeof state.contextMenuView.setIgnoreMouseEvents === 'function') {
         state.contextMenuView.setIgnoreMouseEvents(true, { forward: true });
       }
-      if (state.contextMenuView.webContents && !state.contextMenuView.webContents.isDestroyed()) {
+      if (wasVisible && state.contextMenuView.webContents && !state.contextMenuView.webContents.isDestroyed()) {
         state.contextMenuView.webContents.executeJavaScript("if (window.hideContent) window.hideContent();").catch(() => {});
       }
     } catch (e) {
       console.error('[ContextMenu] hideContextMenu error:', e);
     }
+    scheduleOverlayTeardown(win, state, 'contextMenu');
   }
   currentContextMenuTarget = null;
 }
@@ -89,6 +101,7 @@ function hideOmnibarPopup(win) {
   if (!win || win.isDestroyed()) return;
   const state = getWindowState(win);
   if (state && state.omnibarPopupView) {
+    const wasVisible = !!state.isOmnibarPopupVisible;
     state.isOmnibarPopupVisible = false;
     state.activeOmnibarPopupType = null;
     state.pendingOmnibarPopup = null;
@@ -97,17 +110,87 @@ function hideOmnibarPopup(win) {
       if (typeof state.omnibarPopupView.setIgnoreMouseEvents === 'function') {
         state.omnibarPopupView.setIgnoreMouseEvents(true, { forward: true });
       }
-      if (state.omnibarPopupView.webContents && !state.omnibarPopupView.webContents.isDestroyed()) {
+      if (wasVisible && state.omnibarPopupView.webContents && !state.omnibarPopupView.webContents.isDestroyed()) {
         state.omnibarPopupView.webContents.executeJavaScript("if (window.hidePopup) window.hidePopup();").catch(() => {});
       }
     } catch (e) {
       console.error('[OmnibarPopup] hideOmnibarPopup error:', e);
     }
+    scheduleOverlayTeardown(win, state, 'omnibar');
   }
 }
 
+function clearOverlayTeardown(state, key) {
+  if (!state || !state._overlayTeardownTimers) return;
+  const timer = state._overlayTeardownTimers[key];
+  if (timer) {
+    clearTimeout(timer);
+    delete state._overlayTeardownTimers[key];
+  }
+}
+
+// Hidden overlay views keep a whole renderer process alive. Tear them down after
+// a minute of disuse; they are recreated on the next click.
+function scheduleOverlayTeardown(win, state, key, delayMs = 60000) {
+  if (!win || win.isDestroyed() || !state) return;
+  state._overlayTeardownTimers = state._overlayTeardownTimers || {};
+  clearOverlayTeardown(state, key);
+
+  const timer = setTimeout(() => {
+    if (!state._overlayTeardownTimers || state._overlayTeardownTimers[key] !== timer) return;
+    delete state._overlayTeardownTimers[key];
+    if (!win || win.isDestroyed()) return;
+
+    const view = key === 'omnibar'
+      ? state.omnibarPopupView
+      : key === 'suggestions'
+        ? state.suggestionsView
+        : state.contextMenuView;
+    if (!view) return;
+    if (key === 'omnibar' && state.isOmnibarPopupVisible) return;
+
+    try {
+      if (win.contentView && win.contentView.children && win.contentView.children.includes(view)) {
+        win.contentView.removeChildView(view);
+      }
+    } catch (e) {}
+    try {
+      if (view.webContents && !view.webContents.isDestroyed()) view.webContents.destroy();
+    } catch (e) {}
+
+    if (key === 'omnibar') {
+      state.omnibarPopupView = null;
+      state.isOmnibarPopupViewLoaded = false;
+      state.pendingOmnibarPopup = null;
+    } else if (key === 'suggestions') {
+      state.suggestionsView = null;
+      state.isSuggestionsViewLoaded = false;
+    } else {
+      state.contextMenuView = null;
+      state.isContextMenuViewLoaded = false;
+      state.pendingContextMenu = null;
+    }
+  }, delayMs);
+  if (timer.unref) timer.unref();
+  state._overlayTeardownTimers[key] = timer;
+}
+
+// Overlay renderers are created lazily: every WebContentsView costs a full
+// renderer process, and most windows never open the omnibar popup.
 function initOmnibarPopupOverlay(win, state) {
   if (state.omnibarPopupView && state.omnibarPopupView.webContents && !state.omnibarPopupView.webContents.isDestroyed()) return;
+  state.omnibarPopupView = null;
+  state.isOmnibarPopupVisible = false;
+  state.activeOmnibarPopupType = null;
+  state.isOmnibarPopupViewLoaded = false;
+  state.pendingOmnibarPopup = null;
+  state.lastOmnibarPopupRect = null;
+}
+
+function ensureOmnibarPopupOverlay(win, state) {
+  if (state.omnibarPopupView && state.omnibarPopupView.webContents && !state.omnibarPopupView.webContents.isDestroyed()) return state.omnibarPopupView;
+  clearOverlayTeardown(state, 'omnibar');
+  state.isOmnibarPopupViewLoaded = false;
 
   state.omnibarPopupView = new WebContentsView({
     webPreferences: {
@@ -143,6 +226,8 @@ function initOmnibarPopupOverlay(win, state) {
     .catch((err) => {
       console.error('[OmnibarPopup] Failed to load omnibar popup:', err);
     });
+
+  return state.omnibarPopupView;
 }
 
 function showOmnibarPopup(win, type, rect, isLight) {
@@ -150,9 +235,10 @@ function showOmnibarPopup(win, type, rect, isLight) {
   const state = getWindowState(win);
   if (!state) return;
 
+  clearOverlayTeardown(state, 'omnibar');
   if (!state.omnibarPopupView || !state.omnibarPopupView.webContents || state.omnibarPopupView.webContents.isDestroyed()) {
     state.omnibarPopupView = null;
-    initOmnibarPopupOverlay(win, state);
+    ensureOmnibarPopupOverlay(win, state);
   }
 
   state.lastOmnibarPopupRect = rect;
@@ -373,6 +459,16 @@ function showOmnibarPopup(win, type, rect, isLight) {
 
 function initContextMenuOverlay(win, state) {
   if (state.contextMenuView && state.contextMenuView.webContents && !state.contextMenuView.webContents.isDestroyed()) return;
+  state.contextMenuView = null;
+  state.isContextMenuViewLoaded = false;
+  state.isContextMenuVisible = false;
+  state.pendingContextMenu = null;
+}
+
+function ensureContextMenuOverlay(win, state) {
+  if (state.contextMenuView && state.contextMenuView.webContents && !state.contextMenuView.webContents.isDestroyed()) return state.contextMenuView;
+  clearOverlayTeardown(state, 'contextMenu');
+  state.isContextMenuViewLoaded = false;
   state.contextMenuView = new WebContentsView({
     webPreferences: {
       sandbox: true,
@@ -543,8 +639,15 @@ function initContextMenuOverlay(win, state) {
   if (win && win.contentView && win.contentView.children && !win.contentView.children.includes(state.contextMenuView)) {
     win.contentView.addChildView(state.contextMenuView);
   }
+  state.contextMenuView.webContents.once('did-finish-load', () => {
+    state.isContextMenuViewLoaded = true;
+    const pending = state.pendingContextMenu;
+    state.pendingContextMenu = null;
+    if (pending) {
+      showCustomContextMenu(pending.template, pending.x, pending.y, pending.target);
+    }
+  });
   state.contextMenuView.webContents.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(popupHtml));
-  state.isContextMenuViewLoaded = true;
 }
 
 function showCustomContextMenu(template, x, y, webContentsTarget) {
@@ -554,9 +657,14 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
     const state = getWindowState(win);
     if (!state) return;
 
+    clearOverlayTeardown(state, 'contextMenu');
     if (!state.contextMenuView || !state.contextMenuView.webContents || state.contextMenuView.webContents.isDestroyed()) {
       state.contextMenuView = null;
-      initContextMenuOverlay(win, state);
+      ensureContextMenuOverlay(win, state);
+    }
+    if (!state.isContextMenuViewLoaded) {
+      state.pendingContextMenu = { template, x, y, target: webContentsTarget };
+      return;
     }
     const contextMenuView = state.contextMenuView;
     if (!contextMenuView || !contextMenuView.webContents || contextMenuView.webContents.isDestroyed()) return;
@@ -635,6 +743,7 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
       contextMenuView.setIgnoreMouseEvents(false);
     }
     contextMenuView.setBounds({ x: finalX, y: finalY, width: menuWidth, height: menuHeight });
+    state.isContextMenuVisible = true;
     if (typeof contextMenuView.webContents.invalidate === 'function') {
       try { contextMenuView.webContents.invalidate(); } catch(e) {}
     }
@@ -1248,6 +1357,7 @@ const tabViews = new Map(); // tabId -> WebContentsView
 
 function initSuggestionsView(win, state) {
   if (state.suggestionsView) return;
+  clearOverlayTeardown(state, 'suggestions');
 
   state.suggestionsView = new WebContentsView({
     webPreferences: {
@@ -1496,6 +1606,11 @@ function createWarmWindow() {
     lastViewportBounds: null,
     isHtmlFullscreen: false,
     tabs: new Set(),
+    // Tabs registered with the window but intentionally running no renderer
+    // process (lazy session restore or memory-saver sleep). They hydrate on
+    // first activation, like Firefox/Chrome's unloaded tabs.
+    sleptTabs: new Set(),
+    sleepingTabInfo: new Map(),
     isSuggestionsViewLoaded: false
   };
   windowStates.set(win, state);
@@ -1594,6 +1709,7 @@ function claimWarmWindow(x, y, width, height) {
     }
     if (browserWindows.size === 0 && !isUpdating && !isImporting) {
       tabViews.clear();
+      destroyViewPool();
       if (process.platform !== 'darwin') {
         app.quit();
       }
@@ -1639,6 +1755,11 @@ function createBrowserWindow(options = {}) {
     lastViewportBounds: null,
     isHtmlFullscreen: false,
     tabs: new Set(),
+    // Tabs registered with the window but intentionally running no renderer
+    // process (lazy session restore or memory-saver sleep). They hydrate on
+    // first activation, like Firefox/Chrome's unloaded tabs.
+    sleptTabs: new Set(),
+    sleepingTabInfo: new Map(),
     isSuggestionsViewLoaded: false
   };
   windowStates.set(win, state);
@@ -1744,6 +1865,7 @@ function createBrowserWindow(options = {}) {
       }
       if (browserWindows.size === 0 && !isUpdating && !isImporting) {
         tabViews.clear();
+        destroyViewPool();
         if (warmWindow && !warmWindow.isDestroyed()) {
           try { warmWindow.destroy(); } catch(e) {}
           warmWindow = null;
@@ -1827,29 +1949,11 @@ function getArchivePath() {
   return _archivePath;
 }
 
-// Helper to rehydrate an archived tab
-const rehydrateArchivedTab = (view, tabId, url) => {
-  const p = getArchivePath();
-  const file = path.join(p, `${tabId}.json`);
-  const targetUrl = (url && url !== 'about:blank') ? url : 'napture://welcome';
-  if (fs.existsSync(file)) {
-    try {
-      const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-      view.webContents.once('did-finish-load', () => {
-        view.webContents.executeJavaScript(`
-          window.scrollTo(${data.scrollX}, ${data.scrollY});
-        `).catch(() => {});
-        try { fs.unlinkSync(file); } catch (e) {}
-      });
-      view.webContents.loadURL(targetUrl);
-    } catch (e) {
-      try { fs.unlinkSync(file); } catch (err) {}
-      view.webContents.loadURL(targetUrl);
-    }
-  } else {
-    view.webContents.loadURL(targetUrl);
-  }
-};
+// Helper to rehydrate an archived tab. New archives store the Chromium
+// navigation history (including page state for scroll/form values), so a slept
+// tab comes back with working back/forward rather than a single fresh entry.
+const rehydrateArchivedTab = (view, tabId, url) =>
+  tabSleeper.rehydrateArchivedTab(getTabSleeperRuntime(), view, tabId, url);
 
 function createViewForPool() {
   const view = new WebContentsView({
@@ -1907,13 +2011,40 @@ function getPooledView() {
   return viewToReturn;
 }
 
+let viewPoolTrimTimer = null;
+
+function destroyViewPool() {
+  if (viewPoolTrimTimer) {
+    clearTimeout(viewPoolTrimTimer);
+    viewPoolTrimTimer = null;
+  }
+  for (const view of viewPool) {
+    try {
+      if (view && view.webContents && !view.webContents.isDestroyed()) view.webContents.destroy();
+    } catch (e) {}
+  }
+  viewPool = [];
+}
+
+// Keep at most one blank renderer warm. Two pre-warmed processes cost memory
+// permanently, and the pool is torn down after a minute of no tab creation.
+function scheduleViewPoolTrim() {
+  if (viewPoolTrimTimer) clearTimeout(viewPoolTrimTimer);
+  viewPoolTrimTimer = setTimeout(() => {
+    viewPoolTrimTimer = null;
+    destroyViewPool();
+  }, 90000);
+  if (viewPoolTrimTimer.unref) viewPoolTrimTimer.unref();
+}
+
 function replenishViewPool() {
   // Clean up any naturally destroyed views before counting
   viewPool = viewPool.filter(v => v && v.webContents && !v.webContents.isDestroyed() && !(typeof v.webContents.isCrashed === 'function' && v.webContents.isCrashed()));
 
-  if (viewPool.length < 2) {
+  if (viewPool.length < 1) {
     viewPool.push(createViewForPool());
   }
+  scheduleViewPoolTrim();
 }
 
 function getActivePerformanceMode() {
@@ -1949,30 +2080,32 @@ function applyPerformanceMode(mode = null) {
   }
 }
 
+// Track throttling state locally so repeated focus/tab switches do not spam
+// Chromium with native calls that set the same value again.
+function setViewBackgroundThrottled(view, throttled) {
+  if (!view || !view.webContents || view.webContents.isDestroyed()) return;
+  if (view._backgroundThrottled === throttled) return;
+  try {
+    view.webContents.setBackgroundThrottling(throttled);
+    view._backgroundThrottled = throttled;
+  } catch (e) {}
+}
+
 function applyPerformanceModeToWindow(win, isFocused = true, mode = null) {
   if (!win || win.isDestroyed()) return;
-  const activeMode = mode || getActivePerformanceMode();
   const state = getWindowState(win);
   if (!state) return;
 
-  const isBatterySaver = (activeMode === 'battery_saver');
+  // 'mode' is retained for a future frame-rate implementation; throttling only
+  // needs to know whether a tab is foreground or audible.
+  void mode;
 
   state.tabs.forEach(tabId => {
     const view = tabViews.get(tabId);
-    if (view && view.webContents && !view.webContents.isDestroyed()) {
-      const isActive = (tabId === state.activeTabId);
-      const isAudible = typeof view.webContents.isCurrentlyAudible === 'function' && view.webContents.isCurrentlyAudible();
-
-      if (isActive || isAudible) {
-        try {
-          view.webContents.setBackgroundThrottling(false);
-        } catch (e) {}
-      } else {
-        try {
-          view.webContents.setBackgroundThrottling(true);
-        } catch (e) {}
-      }
-    }
+    if (!view || !view.webContents || view.webContents.isDestroyed()) return;
+    const isActive = (tabId === state.activeTabId);
+    const isAudible = typeof view.webContents.isCurrentlyAudible === 'function' && view.webContents.isCurrentlyAudible();
+    setViewBackgroundThrottled(view, !(isActive || isAudible));
   });
 }
 
@@ -1981,6 +2114,7 @@ function setupTabView(view, tabId, win) {
   if (!webContents || webContents.isDestroyed()) return;
   if (webContents._naptureSetup) return;
   webContents._naptureSetup = true;
+  let injectedCssUrl = null;
 
   try {
     webContents.setUserAgent(cleanUserAgent);
@@ -2010,11 +2144,9 @@ function setupTabView(view, tabId, win) {
   }
 
   // Apply background throttling based on active performance mode
-  try {
-    const isTabActive = state ? (state.activeTabId === tabId) : false;
-    const isAudible = typeof webContents.isCurrentlyAudible === 'function' && webContents.isCurrentlyAudible();
-    webContents.setBackgroundThrottling(!isTabActive && !isAudible);
-  } catch (e) {}
+  const isTabActive = state ? (state.activeTabId === tabId) : false;
+  const isAudible = typeof webContents.isCurrentlyAudible === 'function' && webContents.isCurrentlyAudible();
+  setViewBackgroundThrottled(view, !isTabActive && !isAudible);
 
   const setWebContentsMaskColor = (colorHex) => {
     if (!webContents || webContents.isDestroyed()) return;
@@ -2080,6 +2212,7 @@ function setupTabView(view, tabId, win) {
 
   webContents.on('did-start-navigation', (event, url, isInPlace, isMainFrame) => {
     if (isMainFrame && !isInPlace) {
+      injectedCssUrl = null;
       const activeWin = getTargetWin();
       const lowerUrl = (url || '').toLowerCase();
       const isInternal = lowerUrl.startsWith('napture://') || lowerUrl.startsWith('ne://') || lowerUrl.startsWith('about:');
@@ -2129,9 +2262,7 @@ function setupTabView(view, tabId, win) {
 
   webContents.on('media-started-playing', async () => {
     await updateCachedMediaInfo(webContents, tabId, true);
-    try {
-      webContents.setBackgroundThrottling(false);
-    } catch(e) {}
+    setViewBackgroundThrottled(view, false);
     const targetWin = getTargetWin();
     if (targetWin && !targetWin.isDestroyed()) {
       targetWin.webContents.send('media-state-changed', { tabId, state: 'playing' });
@@ -2144,9 +2275,7 @@ function setupTabView(view, tabId, win) {
     const targetState = targetWin ? getWindowState(targetWin) : null;
     const isActive = targetState ? (targetState.activeTabId === tabId) : false;
     if (!isActive) {
-      try {
-        webContents.setBackgroundThrottling(true);
-      } catch(e) {}
+      setViewBackgroundThrottled(view, true);
     }
     if (targetWin && !targetWin.isDestroyed()) {
       targetWin.webContents.send('media-state-changed', { tabId, state: 'paused' });
@@ -2154,6 +2283,12 @@ function setupTabView(view, tabId, win) {
   });
 
   const injectRoundingCSS = () => {
+    if (webContents.isDestroyed()) return;
+    // dom-ready, did-frame-finish-load, and did-finish-load can all fire for the
+    // same document. Insert the stylesheet once per URL instead of three times.
+    const currentUrl = webContents.getURL();
+    if (injectedCssUrl === currentUrl) return;
+    injectedCssUrl = currentUrl;
     webContents.insertCSS(`
       /* Custom styled scrollbars inside pages */
       ::-webkit-scrollbar {
@@ -2489,7 +2624,7 @@ function setupTabView(view, tabId, win) {
 
 }
 
-ipcMain.on('create-tab', (event, { tabId, url }) => {
+ipcMain.on('create-tab', (event, { tabId, url, defer, title }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   const state = getWindowState(win);
   if (!win || !state) return;
@@ -2499,6 +2634,17 @@ ipcMain.on('create-tab', (event, { tabId, url }) => {
   const mruIndex = state.mruTabs.indexOf(tabId);
   if (mruIndex > -1) state.mruTabs.splice(mruIndex, 1);
   state.mruTabs.unshift(tabId);
+
+  state.sleptTabs.delete(tabId);
+  state.sleepingTabInfo.delete(tabId);
+
+  // Lazy session restore: register the tab now, but do not spend a renderer
+  // process on it until the user actually activates it.
+  if (defer) {
+    state.sleptTabs.add(tabId);
+    state.sleepingTabInfo.set(tabId, { url, title: title || 'New Tab' });
+    return;
+  }
 
   const view = getPooledView();
   setTimeout(replenishViewPool, 500);
@@ -2512,12 +2658,18 @@ ipcMain.on('create-tab', (event, { tabId, url }) => {
   tabViews.set(tabId, view);
 
   setupTabView(view, tabId, win);
+  view._lastActiveAt = Date.now();
 
   // Load the initial page
   view.webContents.loadURL(url);
 });
 
 ipcMain.on('warmup-tab', (event, { tabId, url }) => {
+  const warmWin = BrowserWindow.fromWebContents(event.sender);
+  const warmState = getWindowState(warmWin);
+  // Hover-prewarming a slept tab would immediately undo the memory saving.
+  if (warmState && warmState.sleptTabs && warmState.sleptTabs.has(tabId)) return;
+
   let view = tabViews.get(tabId);
   if (view && (!view.webContents || view.webContents.isDestroyed() || (typeof view.webContents.isCrashed === 'function' && view.webContents.isCrashed()))) {
     tabViews.delete(tabId);
@@ -2552,7 +2704,7 @@ ipcMain.on('warmup-tab', (event, { tabId, url }) => {
   // Preemptively wake up frozen view
   if (view && view.webContents) {
     try {
-      view.webContents.setBackgroundThrottling(false);
+      setViewBackgroundThrottled(view, false);
       view.webContents.setAudioMuted(false);
       view.webContents.executeJavaScript('if (typeof window.__naptureResume === "function") window.__naptureResume();').catch(()=>{});
     } catch(e) {}
@@ -2911,7 +3063,7 @@ function restoreTabVideoDisplay(targetTabId) {
   if (!view || !view.webContents || view.webContents.isDestroyed()) return;
 
   try {
-    view.webContents.setBackgroundThrottling(false);
+    setViewBackgroundThrottled(view, false);
     if (typeof view.webContents.invalidate === 'function') {
       view.webContents.invalidate();
     }
@@ -2987,9 +3139,7 @@ function startMediaVideoStream(win, tabId) {
 
   const view = tabViews.get(tabId);
   if (view && view.webContents && !view.webContents.isDestroyed()) {
-    try {
-      view.webContents.setBackgroundThrottling(false);
-    } catch(e) {}
+    setViewBackgroundThrottled(view, false);
   }
 
   let isCapturing = false;
@@ -3121,6 +3271,10 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
   if (!win || !state) return;
   if (!getMainWindow()) return;
 
+  // Activating a slept tab hydrates it below from its archive (or URL).
+  state.sleptTabs.delete(tabId);
+  state.sleepingTabInfo.delete(tabId);
+
   // Stop video stream immediately when switching to the streaming tab to return video to the page
   stopMediaVideoStream(tabId);
 
@@ -3129,33 +3283,33 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
   if (mruIndex > -1) state.mruTabs.splice(mruIndex, 1);
   state.mruTabs.unshift(tabId);
 
-  // Move inactive background tabs offscreen and manage JS clocks
-  state.tabs.forEach(tId => {
-    if (tId !== tabId) {
-      const otherView = tabViews.get(tId);
-      if (otherView && otherView.webContents && !otherView.webContents.isDestroyed()) {
-        try {
-          const isAudible = typeof otherView.webContents.isCurrentlyAudible === 'function' && otherView.webContents.isCurrentlyAudible();
-          const isStreaming = (activeStreamingTabId === tId);
-
-          // Position inactive tab offscreen so Chromium retains its compositor frame sink while preventing visual overlap
-          try {
-            const b = typeof otherView.getBounds === 'function' ? otherView.getBounds() : null;
-            const w = (b && b.width > 0) ? b.width : 800;
-            const h = (b && b.height > 0) ? b.height : 600;
-            otherView.setBounds({ x: -10000, y: -10000, width: w, height: h });
-          } catch (e) {}
-
-          if (!isAudible && !isStreaming) {
-            // Freeze JavaScript clock execution loops for inactive non-playing tabs
-            otherView.webContents.setBackgroundThrottling(true);
-          } else {
-            // Keep background throttling disabled for audible or streaming tabs
-            otherView.webContents.setBackgroundThrottling(false);
-          }
-        } catch (e) {}
-      }
+  // Only the previously active view needs to be parked offscreen. Every other
+  // background view is already offscreen, so tab switching stays O(1) rather
+  // than issuing two native calls for every open tab.
+  const previousActiveId = state.activeTabId;
+  if (previousActiveId && previousActiveId !== tabId) {
+    const previousView = tabViews.get(previousActiveId);
+    if (previousView && previousView.webContents && !previousView.webContents.isDestroyed()) {
+      try {
+        const b = typeof previousView.getBounds === 'function' ? previousView.getBounds() : null;
+        const w = (b && b.width > 0) ? b.width : 800;
+        const h = (b && b.height > 0) ? b.height : 600;
+        previousView.setBounds({ x: -10000, y: -10000, width: w, height: h });
+      } catch (e) {}
     }
+  }
+
+  state.tabs.forEach(tId => {
+    if (tId === tabId) return;
+    const otherView = tabViews.get(tId);
+    if (!otherView || !otherView.webContents || otherView.webContents.isDestroyed()) return;
+    // Already-throttled tabs cannot be playing media; only the previous active
+    // tab and media tabs are still unthrottled at this point, so the native
+    // isCurrentlyAudible() probe is limited to those.
+    if (otherView._backgroundThrottled === true && activeStreamingTabId !== tId) return;
+    const isAudible = typeof otherView.webContents.isCurrentlyAudible === 'function' && otherView.webContents.isCurrentlyAudible();
+    const isStreaming = (activeStreamingTabId === tId);
+    setViewBackgroundThrottled(otherView, !(isAudible || isStreaming));
   });
 
   state.activeTabId = tabId;
@@ -3187,7 +3341,7 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
   } else if (newActiveView && newActiveView.webContents) {
     // Resume frozen view
     try {
-      newActiveView.webContents.setBackgroundThrottling(false);
+      setViewBackgroundThrottled(newActiveView, false);
       newActiveView.webContents.setAudioMuted(false);
       const isCrashed = typeof newActiveView.webContents.isCrashed === 'function' ? newActiveView.webContents.isCrashed() : false;
       const currentUrl = newActiveView.webContents.getURL();
@@ -3200,10 +3354,11 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
 
   if (newActiveView && newActiveView.webContents && !newActiveView.webContents.isDestroyed()) {
     newActiveView._isWarmingUp = false;
+    newActiveView._lastActiveAt = Date.now();
     if (typeof newActiveView.setVisible === 'function') {
       newActiveView.setVisible(true);
     }
-    newActiveView.webContents.setBackgroundThrottling(false);
+    setViewBackgroundThrottled(newActiveView, false);
     hideSuggestionsView(win);
 
     // Apply valid viewport bounds BEFORE mounting to contentView so Chromium initializes with correct dimensions
@@ -3230,11 +3385,6 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
         win.contentView.addChildView(state.omnibarPopupView);
       }
     }
-    if (typeof newActiveView.setVisible === 'function') {
-      newActiveView.setVisible(true);
-    }
-    newActiveView.webContents.setBackgroundThrottling(false);
-    hideSuggestionsView(win);
     resizeActiveView(win, true, true);
     // If live bounds yielded empty width/height (e.g. window minimized or race condition), enforce fallback minimum layout
     try {
@@ -3287,27 +3437,9 @@ ipcMain.on('switch-tab', (event, { tabId, url }) => {
       }
     }, 50);
 
-    // Force inject rounding CSS and elements on tab switch / focus to ensure it's always rounded
-    newActiveView.webContents.insertCSS(`
-      /* Custom styled scrollbars inside pages */
-      ::-webkit-scrollbar {
-        width: 10px !important;
-        height: 10px !important;
-      }
-      ::-webkit-scrollbar-track {
-        background: transparent !important;
-      }
-      ::-webkit-scrollbar-thumb {
-        background-color: rgba(127, 140, 255, 0.4) !important;
-        border: 2px solid transparent !important;
-        background-clip: padding-box !important;
-        border-radius: 10px !important;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background-color: rgba(127, 140, 255, 0.8) !important;
-      }
-    `, { cssOrigin: 'user' }).catch(() => {});
-
+    // Scrollbar styling is injected once per document by setupTabView. Do not
+    // insert another stylesheet on every switch; that forced a full style
+    // recalc and accumulated duplicate CSS in long-lived pages.
     injectRoundingElements(newActiveView.webContents);
 
     // Sync the switched view's URL/history state to the address bar
@@ -3383,7 +3515,10 @@ ipcMain.on('close-tab', (event, tabId) => {
   const state = getWindowState(win);
   if (!win || !state) return;
   if (!state.tabs.has(tabId)) return; // Security check to prevent race conditions across windows
-  
+
+  state.sleptTabs.delete(tabId);
+  state.sleepingTabInfo.delete(tabId);
+
   const mruIndex = state.mruTabs.indexOf(tabId);
   if (mruIndex > -1) state.mruTabs.splice(mruIndex, 1);
   state.tabs.delete(tabId);
@@ -3403,7 +3538,11 @@ ipcMain.on('close-tab', (event, tabId) => {
   } catch (e) {}
 
   const view = tabViews.get(tabId);
-  if (!view) return;
+  if (!view) {
+    // The tab was asleep/lazy and has no renderer; drop its archive too.
+    try { fs.unlinkSync(path.join(getArchivePath(), `${tabId}.json`)); } catch (e) {}
+    return;
+  }
 
   if (state.activeTabId === tabId) {
     state.activeTabId = null;
@@ -3603,6 +3742,7 @@ ipcMain.on('update-suggestions-overlay', (event, { suggestions, bounds, isLight,
   if (!state.suggestionsView) {
     initSuggestionsView(win, state);
   }
+  clearOverlayTeardown(state, 'suggestions');
   const suggestionsView = state.suggestionsView;
 
   if (!suggestions || suggestions.length === 0) {
@@ -5803,7 +5943,20 @@ function saveCurrentSessionFromMain() {
 
       for (const tabId of state.tabs) {
         const view = tabViews.get(tabId);
-        if (!view || !view.webContents || view.webContents.isDestroyed()) continue;
+        if (!view || !view.webContents || view.webContents.isDestroyed()) {
+          // Slept or lazily restored tabs have no live renderer. Preserve them
+          // from the bookkeeping map so closing the window never drops them.
+          const info = state.sleepingTabInfo && state.sleepingTabInfo.get(tabId);
+          if (info && info.url && !isWelcomeUrl(info.url)) {
+            tabsToSave.push({
+              id: tabId,
+              url: info.url,
+              title: info.title || 'New Tab',
+              isPinned: 0
+            });
+          }
+          continue;
+        }
         const rawUrl = view.webContents.getURL();
         if (!rawUrl || isWelcomeUrl(rawUrl)) continue;
         const title = view.webContents.getTitle() || 'New Tab';
@@ -5914,8 +6067,8 @@ function getDefaultSettings() {
     language: 'en-US',
     spellCheck: true,
     offerTranslate: true,
-    memorySaver: false,
-    memoryTarget: 700,
+    memorySaver: true,
+    memoryTarget: DEFAULT_MEMORY_TARGET_MB,
     batterySaver: false,
     performanceMode: 'balanced',
     hardwareAcceleration: true,
@@ -5938,6 +6091,15 @@ ipcMain.handle('reset-all-settings', () => {
 ipcMain.handle('reset-all-data', async () => {
   const defaults = getDefaultSettings();
   resetAllData(defaults);
+
+  // Sleep archives can contain page state; reset-all-data must remove them.
+  try {
+    const archiveDir = getArchivePath();
+    for (const name of fs.readdirSync(archiveDir)) {
+      if (!name.endsWith('.json')) continue;
+      try { fs.unlinkSync(path.join(archiveDir, name)); } catch (e) {}
+    }
+  } catch (e) {}
 
   // Clear download history
   downloadHistory = [];
@@ -5984,6 +6146,8 @@ ipcMain.handle('reset-all-data', async () => {
         state.tabs.clear();
         state.mruTabs = [];
         state.pinnedTabs.clear();
+        state.sleptTabs.clear();
+        state.sleepingTabInfo.clear();
         state.activeTabId = null;
       }
       if (!win.isDestroyed()) {
@@ -6576,18 +6740,60 @@ function registerWindowsBrowser() {
   });
 }
 
+// ---- Memory saver / tab sleeping ----
+
+function getTabSleeperRuntime() {
+  return {
+    app,
+    os,
+    path,
+    fs,
+    browserWindows,
+    tabViews,
+    getWindowState,
+    getWindowByTabId,
+    getArchivePath,
+    getSetting,
+    getMemoryTargetBytes,
+    classifyMemoryPressure,
+    rankTabsForDiscard,
+    defaultMemoryTargetMB: DEFAULT_MEMORY_TARGET_MB,
+    getActiveStreamingTabId: () => activeStreamingTabId,
+    clearMediaForTab: (tabId) => {
+      if (cachedMediaInfo && cachedMediaInfo.tabId === tabId) cachedMediaInfo = null;
+      if (lastActiveMediaTabId === tabId) lastActiveMediaTabId = null;
+      if (activeStreamingTabId === tabId) stopMediaVideoStream();
+    }
+  };
+}
+
+function sleepTabToDisk(win, state, tabId, view) {
+  return tabSleeper.sleepTabToDisk(getTabSleeperRuntime(), win, state, tabId, view);
+}
+
+function runMemorySaver(options = {}) {
+  return tabSleeper.runMemorySaver(getTabSleeperRuntime(), options);
+}
+
 // App Lifecycle
 
 app.on('memory-pressure', (event, level) => {
-  if (level === 'critical' || level === 'moderate') {
-    // Intercept system memory pressure warnings.
+  if (level !== 'critical' && level !== 'moderate') return;
+
+  // Clearing the HTTP cache under pressure is a last resort; sleeping tabs is
+  // far cheaper and avoids slowing down the next navigation.
+  if (level === 'critical') {
     try {
       const { session } = require('electron');
       if (session.defaultSession) {
         session.defaultSession.clearCache();
         session.defaultSession.clearHostResolverCache();
       }
-    } catch(e) {}
+    } catch (e) {}
+  }
+
+  if (app.isReady()) {
+    runMemorySaver({ forcedPressure: level === 'critical' ? 'critical' : 'high' });
   }
 });
 
@@ -6672,10 +6878,18 @@ app.whenReady().then(async () => {
   // Initialize History Database (if not already init)
   initDB();
 
-  // Version migration: Automatically disable memory saver once for users updating from older versions
-  if (!getSetting('memorySaver_v20_migrated', false)) {
-    setSetting('memorySaver', false);
-    setSetting('memorySaver_v20_migrated', true);
+  // Version migration: the 0.20 release force-disabled the old memory saver
+  // because it discarded every idle tab at once. The rebuilt implementation
+  // sleeps tabs LRU-style and restores history/scroll, so re-enable it once for
+  // profiles that still carry the old migration default. Users who tuned the
+  // target themselves keep their choice.
+  if (!getSetting('memorySaver_v22_migrated', false)) {
+    const storedTarget = Number(getSetting('memoryTarget', DEFAULT_MEMORY_TARGET_MB));
+    if (getSetting('memorySaver_v20_migrated', false) && storedTarget === 700) {
+      setSetting('memorySaver', true);
+      setSetting('memoryTarget', DEFAULT_MEMORY_TARGET_MB);
+    }
+    setSetting('memorySaver_v22_migrated', true);
   }
 
   // Apply initial performance mode (frame rates, throttling)
@@ -6690,139 +6904,11 @@ app.whenReady().then(async () => {
     });
   }
 
-  // Napture Memory Saver & RSS-Driven Discarding
-  setInterval(() => {
-    const memSaver = getSetting('memorySaver', false);
-    if (!memSaver) return;
-
-    let totalWorkingSetSize = 0;
-    let cachedMetrics = [];
-    try {
-      cachedMetrics = app.getAppMetrics();
-      for (const m of cachedMetrics) {
-        if (m.memory && m.memory.workingSetSize) {
-          totalWorkingSetSize += m.memory.workingSetSize;
-        }
-      }
-    } catch(e) {}
-
-    const memTarget = getSetting('memoryTarget', 700);
-    const memoryThreshold = memTarget * 1024;
-
-    const protectedPids = new Set();
-    const now = Date.now();
-    for (const w of browserWindows) {
-      const s = getWindowState(w);
-      if (!s) continue;
-      s.tabs.forEach(id => {
-        const v = tabViews.get(id);
-        if (v && v.webContents && !v.webContents.isDestroyed()) {
-          let protect = false;
-          if (id === s.activeTabId) protect = true;
-          if (!protect && s.pinnedTabs && s.pinnedTabs.has(id)) protect = true;
-          if (!protect && v._isArchiving) protect = true; // Protect tabs already being archived
-          if (!protect && v._createdAt && (now - v._createdAt < 60000)) protect = true; // Protect tabs created in the last 1 minute
-          if (!protect) {
-            const isAudible = typeof v.webContents.isCurrentlyAudible === 'function' && v.webContents.isCurrentlyAudible();
-            const isLoading = typeof v.webContents.isLoading === 'function' && v.webContents.isLoading();
-            if (isAudible || isLoading) protect = true;
-          }
-          if (protect) {
-            try { protectedPids.add(v.webContents.getOSProcessId()); } catch(e) {}
-          }
-        }
-      });
-    }
-
-    const evictions = [];
-
-    for (const win of browserWindows) {
-      const state = getWindowState(win);
-      if (!state) continue;
-      
-      state.tabs.forEach(id => {
-        const view = tabViews.get(id);
-        if (view && view.webContents && !view.webContents.isDestroyed()) {
-          const isAudible = typeof view.webContents.isCurrentlyAudible === 'function' && view.webContents.isCurrentlyAudible();
-          if (id === state.activeTabId || isAudible) {
-            // Keep background throttling disabled for active tab and audible tabs (e.g. YouTube playing in background or foreground)
-            view.webContents.setBackgroundThrottling(false);
-          } else {
-            view.webContents.setBackgroundThrottling(true);
-          }
-
-          if (totalWorkingSetSize > memoryThreshold) {
-            try {
-              const pid = view.webContents.getOSProcessId();
-              if (!protectedPids.has(pid)) {
-
-                // Get the working set size of this specific process before destroying it
-                let processMemory = 0;
-                try {
-                  const procMetric = cachedMetrics.find(m => m.pid === pid);
-                  if (procMetric && procMetric.memory && procMetric.memory.workingSetSize) {
-                    processMemory = procMetric.memory.workingSetSize;
-                  }
-                } catch(e) {}
-
-                if (processMemory > 0) {
-                  totalWorkingSetSize -= processMemory;
-                }
-
-                evictions.push({ id, view });
-                protectedPids.add(pid); // Avoid adding the same process multiple times
-              }
-            } catch (e) {}
-          }
-        }
-      });
-    }
-
-    evictions.forEach(({ id, view }) => {
-      view._isArchiving = true;
-      view.webContents.executeJavaScript(`
-        ({
-          scrollX: window.scrollX,
-          scrollY: window.scrollY
-        })
-      `).then(state => {
-        // Double check if tab became active during serialization
-        let isNowActive = false;
-        for (const w of browserWindows) {
-          const s = getWindowState(w);
-          if (s && s.activeTabId === id) {
-             isNowActive = true;
-             break;
-          }
-        }
-        if (isNowActive) {
-           view._isArchiving = false;
-           return;
-        }
-
-        const file = path.join(getArchivePath(), `${id}.json`);
-        fs.writeFileSync(file, JSON.stringify(state), 'utf8');
-        try { view.webContents.destroy(); } catch(e) {}
-        tabViews.delete(id);
-      }).catch(() => {
-        // Double check if tab became active during serialization
-        let isNowActive = false;
-        for (const w of browserWindows) {
-          const s = getWindowState(w);
-          if (s && s.activeTabId === id) {
-             isNowActive = true;
-             break;
-          }
-        }
-        if (isNowActive) {
-           view._isArchiving = false;
-           return;
-        }
-         try { view.webContents.destroy(); } catch(e) {}
-         tabViews.delete(id);
-      });
-    });
-  }, 60000);
+  // Napture Memory Saver: sleep least-recently-used background tabs. The pass
+  // also performs hard-idle maintenance (tabs untouched for an hour) even when
+  // the app is under its target, so long sessions gradually release memory.
+  const memorySaverTimer = setInterval(() => runMemorySaver(), 30000);
+  if (memorySaverTimer.unref) memorySaverTimer.unref();
 
   // Intercept HTTP request headers to remove Electron identifiers and sanitize Client Hints.
   // Preserves X-Requested-With: XMLHttpRequest required by GitHub merge status / AJAX fragments.
@@ -7650,11 +7736,13 @@ rm -rf "${extractDir}" "${zipPath}" "\$0"
 app.on('child-process-gone', (event, details) => {
   if (details && (details.reason === 'oom' || details.reason === 'memory-eviction')) {
     try { const { session } = require('electron'); session.defaultSession.clearCache(); session.defaultSession.clearHostResolverCache(); } catch(e) {}
+    if (app.isReady()) runMemorySaver({ forcedPressure: 'high' });
   }
 });
 
 app.on('before-quit', () => {
   saveCurrentSessionFromMain();
+  destroyViewPool();
   if (warmWindow && !warmWindow.isDestroyed()) {
     try { warmWindow.destroy(); } catch (e) {}
     warmWindow = null;

@@ -1361,7 +1361,7 @@ function getInitialTabTitle(url) {
 // ----------------------------------------------------
 // switchTo: if false, the tab is created in the background without switching focus.
 // Returns the new tabId.
-function createTab(url = 'napture://welcome', switchTo = true, customTabId = null, forceNew = false) {
+function createTab(url = 'napture://welcome', switchTo = true, customTabId = null, forceNew = false, deferLoad = false) {
   // If switch to existing tab/bookmark is enabled, check if the non-welcome URL is already open or bookmarked
   if (!customTabId && !forceNew && url && !isWelcomeUrl(url) && (!currentSettings || currentSettings.switchToExistingTab !== false)) {
     const cleanTarget = String(url).trim().toLowerCase().replace(/\/+$/, '');
@@ -1410,7 +1410,8 @@ function createTab(url = 'napture://welcome', switchTo = true, customTabId = nul
     id: tabId,
     title: getInitialTabTitle(url),
     url: url,
-    isLoading: !isWelcome,
+    isLoading: !isWelcome && !deferLoad,
+    isSleeping: deferLoad,
     favicon: null,
     canGoBack: false,
     canGoForward: false,
@@ -1419,11 +1420,17 @@ function createTab(url = 'napture://welcome', switchTo = true, customTabId = nul
   };
 
   tabs.push(newTab);
-  window.naptureAPI.createTab(tabId, url);
+  if (deferLoad) {
+    window.naptureAPI.createTab(tabId, url, { defer: true, title: newTab.title });
+  } else {
+    window.naptureAPI.createTab(tabId, url);
+  }
 
   if (switchTo) {
     switchTab(tabId);
-  } else {
+  } else if (!deferLoad) {
+    // Deferred restore is batched: rendering every restored tab one at a time
+    // is wasted layout work before the first switch paints the strip.
     renderTabs();
     if (typeof window.updateActiveBookmark === 'function') {
       window.updateActiveBookmark();
@@ -1527,10 +1534,11 @@ function switchTab(tabId) {
   if (isToolbarCustomizing) return;
   activeTabId = tabId;
   _lastSentBounds = null;
-  renderTabs();
+  if (!updateActiveTabHighlight()) renderTabs();
   
   const activeTab = tabs.find(t => t.id === activeTabId);
   if (activeTab) {
+    activeTab.isSleeping = false;
     updateAddressBarDisplay(activeTab.url, activeTab.title);
     if (document.activeElement !== addressInput) {
       hideAddressInput();
@@ -1638,6 +1646,37 @@ function closeTab(tabId, event) {
   if (typeof window.updateActiveBookmark === 'function') {
     window.updateActiveBookmark();
   }
+}
+
+// Switching tabs does not change the strip's contents, only which tab is
+// active. Update just that class instead of rebuilding every tab element and
+// reattaching all drag/drop listeners on every switch. Fall back to a full
+// render when the DOM and model disagree (creation, close, pinned changes).
+function updateActiveTabHighlight() {
+  if (!tabsContainer) return false;
+  const pinnedTabIds = new Set(pinnedSites.map(p => p.tabId));
+  const bookmarkTabIds = window.getBookmarkTabIds ? new Set(window.getBookmarkTabIds()) : new Set();
+  const regularTabs = tabs.filter(tab => !pinnedTabIds.has(tab.id) && !bookmarkTabIds.has(tab.id) && !isWelcomeUrl(tab.url));
+  const tabEls = tabsContainer.querySelectorAll('.tab');
+  if (tabEls.length !== regularTabs.length) return false;
+
+  let activeSeen = false;
+  let activeEl = null;
+  tabEls.forEach(el => {
+    const isActive = el.dataset.tabId === activeTabId;
+    el.classList.toggle('active', isActive);
+    el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    if (isActive) {
+      activeSeen = true;
+      activeEl = el;
+    }
+  });
+
+  if (!activeSeen) return false;
+  if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+    try { activeEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+  return true;
 }
 
 function renderTabs() {
@@ -3380,7 +3419,13 @@ loadPinnedSites();
         if (!cleanUrl || isWelcomeUrl(cleanUrl)) continue;
         if (pinnedUrls.has(cleanUrl) || bookmarkUrls.has(cleanUrl)) continue; // Don't restore tabs already present in pinned/bookmarks area
 
-        const createdId = createTab(t.url, false);
+        // Restore background tabs lazily: the main process registers them but
+        // only the first tab gets a live renderer process. The rest hydrate on
+        // first activation, keeping startup memory flat regardless of tab count.
+        // Reusing the stored id also lets a slept tab find its scroll/history
+        // archive after a restart.
+        const restoredId = t.id != null ? String(t.id) : null;
+        const createdId = createTab(t.url, false, restoredId, false, true);
         if (!firstRestoredTabId) firstRestoredTabId = createdId;
         restoredTabs++;
       }
