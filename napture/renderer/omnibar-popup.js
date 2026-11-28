@@ -1,5 +1,8 @@
 // Omnibar search suggestion popup dropdown and keyboard navigation handler
 // Firefox-style Omnibar Popup Overlay (Downloads & History)
+//
+// Markup is built from the design system's .nb-menu components defined in
+// napture/styles/design-system.css. Only content and theme are supplied here.
 
 let currentPopupType = null;
 let allHistoryItems = [];
@@ -54,13 +57,16 @@ document.addEventListener('click', (e) => {
   }
 });
 
-window.updateContent = function(html, bg, border, shadow, itemColor, itemHoverBg, itemHoverColor, isLight) {
+/**
+ * The design system owns the menu skin. This only swaps the content and tells
+ * the document which theme to resolve its tokens against.
+ */
+window.updateContent = function(html, isLight) {
   const container = document.getElementById('popup-container');
   if (!container) return;
-  document.body.className = isLight ? 'light-theme' : 'dark-theme';
-  if (bg) container.style.background = bg;
-  if (border) container.style.borderColor = border;
-  if (shadow) container.style.boxShadow = shadow;
+  const theme = isLight ? 'light-theme' : 'dark-theme';
+  document.body.className = theme;
+  document.documentElement.setAttribute('data-nb-theme', isLight ? 'light' : 'dark');
   container.innerHTML = html;
   reportHeight();
 };
@@ -76,25 +82,68 @@ function reportHeight() {
   });
 }
 
+const DOWNLOAD_ICON = `
+  <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+    <polyline points="7 10 12 15 17 10"></polyline>
+    <line x1="12" y1="15" x2="12" y2="3"></line>
+  </svg>
+`;
+
+const HISTORY_ICON = `
+  <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="12" r="10"></circle>
+    <polyline points="12 6 12 12 16 14"></polyline>
+  </svg>
+`;
+
+const TRASH_ICON = `
+  <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="3 6 5 6 21 6"></polyline>
+    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+  </svg>
+`;
+
+function menuItem({ id, action, payload, title, icon, label, meta }) {
+  const attrs = [
+    'class="nb-menu__item"',
+    'role="menuitem"',
+    id ? `id="${id}"` : '',
+    title ? `title="${escapeHtml(title)}"` : '',
+    action ? `data-action="${action}"` : '',
+    payload ? `data-payload="${payload}"` : ''
+  ].filter(Boolean).join(' ');
+
+  return `
+    <button ${attrs}>
+      <span class="nb-menu__icon">${icon}</span>
+      <span class="nb-menu__label">${label}</span>
+      ${meta ? `<span class="nb-menu__meta">${meta}</span>` : ''}
+    </button>
+  `;
+}
+
+function emptyItem(label) {
+  return `<button class="nb-menu__item is-disabled" role="menuitem" aria-disabled="true"><span class="nb-menu__label">${label}</span></button>`;
+}
+
 // Render Downloads View
 async function renderDownloadsView() {
   const container = document.getElementById('popup-container');
   if (!container) return;
 
   container.innerHTML = `
-    <div id="omnibar-downloads-list" style="display: flex; flex-direction: column; gap: 2px;">
-      <button class="menu-item disabled"><span class="item-title">Loading downloads...</span></button>
+    <div id="omnibar-downloads-list" class="nb-list">
+      ${emptyItem('Loading downloads...')}
     </div>
-    <div class="menu-divider"></div>
-    <button id="omnibar-downloads-show-all" class="menu-item" title="Show all downloads">
-      <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      <span class="item-title">Show all downloads</span>
-      <span class="menu-meta">Ctrl+J</span>
-    </button>
+    <div class="nb-menu__divider" role="separator"></div>
+    ${menuItem({
+      id: 'omnibar-downloads-show-all',
+      title: 'Show all downloads',
+      icon: DOWNLOAD_ICON,
+      label: 'Show all downloads',
+      meta: 'Ctrl+J'
+    })}
   `;
 
   const showAllBtn = document.getElementById('omnibar-downloads-show-all');
@@ -118,7 +167,7 @@ async function refreshDownloadsList() {
   listEl.innerHTML = '';
 
   if (!items || items.length === 0) {
-    listEl.innerHTML = '<button class="menu-item disabled"><span class="item-title">No recent downloads</span></button>';
+    listEl.innerHTML = emptyItem('No recent downloads');
     reportHeight();
     return;
   }
@@ -126,7 +175,8 @@ async function refreshDownloadsList() {
   const fragment = document.createDocumentFragment();
   items.slice(0, 5).forEach(item => {
     const el = document.createElement('button');
-    el.className = 'menu-item';
+    el.className = 'nb-menu__item';
+    el.setAttribute('role', 'menuitem');
 
     const safeName = escapeHtml(item.name || 'Download');
     let metaText = 'Done';
@@ -139,13 +189,9 @@ async function refreshDownloadsList() {
     }
 
     el.innerHTML = `
-      <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-        <polyline points="7 10 12 15 17 10"></polyline>
-        <line x1="12" y1="15" x2="12" y2="3"></line>
-      </svg>
-      <span class="item-title">${safeName}</span>
-      <span class="menu-meta">${escapeHtml(metaText)}</span>
+      <span class="nb-menu__icon">${DOWNLOAD_ICON}</span>
+      <span class="nb-menu__label">${safeName}</span>
+      <span class="nb-menu__meta">${escapeHtml(metaText)}</span>
     `;
 
     el.addEventListener('click', () => {
@@ -167,25 +213,23 @@ async function renderHistoryView() {
   if (!container) return;
 
   container.innerHTML = `
-    <div id="omnibar-history-list" style="display: flex; flex-direction: column; gap: 2px;">
-      <button class="menu-item disabled"><span class="item-title">Loading history...</span></button>
+    <div id="omnibar-history-list" class="nb-list">
+      ${emptyItem('Loading history...')}
     </div>
-    <div class="menu-divider"></div>
-    <button id="omnibar-history-show-all" class="menu-item" title="Show all history">
-      <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-        <circle cx="12" cy="12" r="10"></circle>
-        <polyline points="12 6 12 12 16 14"></polyline>
-      </svg>
-      <span class="item-title">Show all history</span>
-      <span class="menu-meta">Ctrl+H</span>
-    </button>
-    <button id="omnibar-history-clear" class="menu-item" title="Clear recent history">
-      <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-        <polyline points="3 6 5 6 21 6"></polyline>
-        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-      </svg>
-      <span class="item-title">Clear recent history</span>
-    </button>
+    <div class="nb-menu__divider" role="separator"></div>
+    ${menuItem({
+      id: 'omnibar-history-show-all',
+      title: 'Show all history',
+      icon: HISTORY_ICON,
+      label: 'Show all history',
+      meta: 'Ctrl+H'
+    })}
+    ${menuItem({
+      id: 'omnibar-history-clear',
+      title: 'Clear recent history',
+      icon: TRASH_ICON,
+      label: 'Clear recent history'
+    })}
   `;
 
   const showAllBtn = document.getElementById('omnibar-history-show-all');
@@ -223,7 +267,7 @@ function renderHistoryItems(items) {
 
   const recents = (items || []).slice(0, 5);
   if (recents.length === 0) {
-    listEl.innerHTML = '<button class="menu-item disabled"><span class="item-title">No recent history</span></button>';
+    listEl.innerHTML = emptyItem('No recent history');
     reportHeight();
     return;
   }
@@ -231,9 +275,15 @@ function renderHistoryItems(items) {
   const fragment = document.createDocumentFragment();
   recents.forEach(item => {
     const el = document.createElement('button');
-    el.className = 'menu-item';
+    el.className = 'nb-menu__item';
+    el.setAttribute('role', 'menuitem');
 
     const safeTitle = escapeHtml(item.title || item.url || 'History Item');
+    const faviconUrl = getFaviconForUrl(item.url);
+    const icon = faviconUrl
+      ? `<img src="${faviconUrl}" width="15" height="15" alt="" onerror="this.style.display='none'" />`
+      : HISTORY_ICON;
+
     let timeStr = '';
     if (item.timestamp) {
       try {
@@ -242,12 +292,9 @@ function renderHistoryItems(items) {
     }
 
     el.innerHTML = `
-      <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-        <circle cx="12" cy="12" r="10"></circle>
-        <polyline points="12 6 12 12 16 14"></polyline>
-      </svg>
-      <span class="item-title">${safeTitle}</span>
-      ${timeStr ? `<span class="menu-meta">${escapeHtml(timeStr)}</span>` : ''}
+      <span class="nb-menu__icon">${icon}</span>
+      <span class="nb-menu__label">${safeTitle}</span>
+      ${timeStr ? `<span class="nb-menu__meta">${escapeHtml(timeStr)}</span>` : ''}
     `;
 
     el.addEventListener('click', () => {
@@ -266,7 +313,9 @@ function renderHistoryItems(items) {
 // Window Controller Interface
 window.showPopup = function(type, isLight) {
   currentPopupType = type;
-  document.body.className = isLight ? 'light-theme' : 'dark-theme';
+  const theme = isLight ? 'light-theme' : 'dark-theme';
+  document.body.className = theme;
+  document.documentElement.setAttribute('data-nb-theme', isLight ? 'light' : 'dark');
 
   if (type === 'downloads') {
     renderDownloadsView();

@@ -128,6 +128,18 @@ npm test
 
 ---
 
+## Design System
+
+Every visual element in Napture is defined once in [`napture/styles/design-system.css`](napture/styles/design-system.css) and documented in [`napture/styles/DESIGN.md`](napture/styles/DESIGN.md).
+
+- **Tokens** — colours, type scale, spacing, radii, elevation, motion and layering are `--nb-*` custom properties. Never hard-code a value.
+- **Components** — buttons, inputs, switches, cards, list rows, menus, modals, badges, tabs, nav, progress and empty states are `.nb-*` classes with their states built in.
+- **Surfaces** — `data-nb-surface="chrome"` for the translucent browser shell, `data-nb-surface="page"` for opaque full-page UI.
+
+Read `DESIGN.md` before adding UI; it contains the complete element reference and the checklist for a new surface.
+
+---
+
 ## Project Structure
 
 ```

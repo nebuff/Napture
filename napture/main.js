@@ -15,6 +15,20 @@ const {
   rankTabsForDiscard
 } = require('./memory-manager');
 const tabSleeper = require('./tab-sleeper');
+const { menuOuterHeight } = require('./styles/design-tokens');
+// The global design system, inlined into standalone overlay documents that are
+// loaded from a data URL or a temp path where relative stylesheets cannot resolve.
+let _designSystemCss = null;
+function getDesignSystemCss() {
+  if (_designSystemCss !== null) return _designSystemCss;
+  try {
+    _designSystemCss = fs.readFileSync(path.join(__dirname, 'styles', 'design-system.css'), 'utf8');
+  } catch (e) {
+    console.error('[DesignSystem] Failed to load design-system.css:', e);
+    _designSystemCss = '';
+  }
+  return _designSystemCss;
+}
 const { initTelemetry } = require('./src/telemetry/telemetryClient');
 
 // Isolate user data and single-instance locks in development to prevent clobbering or killing regular running Napture instances
@@ -253,13 +267,14 @@ function showOmnibarPopup(win, type, rect, isLight) {
   const winContentBounds = win.getContentBounds ? win.getContentBounds() : win.getBounds();
 
   let htmlItems = '';
-  let calculatedHeight = 10;
+  let menuItemCount = 0;
+  let menuDividerCount = 0;
 
   if (type === 'downloads') {
     const recent = (downloadHistory || []).slice(0, 5);
     if (recent.length === 0) {
-      htmlItems += '<button class="menu-item disabled"><span class="item-title">No recent downloads</span></button>';
-      calculatedHeight += 30;
+      htmlItems += '<button class="nb-menu__item is-disabled" role="menuitem" aria-disabled="true"><span class="nb-menu__label">No recent downloads</span></button>';
+      menuItemCount++;
     } else {
       recent.forEach((item) => {
         const safeName = escapeHtml(item.name || 'Download');
@@ -273,45 +288,47 @@ function showOmnibarPopup(win, type, rect, isLight) {
         }
         const payloadStr = encodeURIComponent(JSON.stringify({ id: item.id || '', path: item.path || '', name: item.name || '' }));
         const iconMarkup = item.iconUrl
-          ? `<img src="${item.iconUrl}" width="16" height="16" style="flex-shrink: 0; object-fit: contain; border-radius: 3px;" />`
-          : `<svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+          ? `<img src="${item.iconUrl}" width="16" height="16" alt="" />`
+          : `<svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
             </svg>`;
         htmlItems += `
-          <button class="menu-item" data-action="open-download" data-payload="${payloadStr}">
-            ${iconMarkup}
-            <span class="item-title">${safeName}</span>
-            <span class="menu-meta">${escapeHtml(metaText)}</span>
+          <button class="nb-menu__item" role="menuitem" data-action="open-download" data-payload="${payloadStr}">
+            <span class="nb-menu__icon">${iconMarkup}</span>
+            <span class="nb-menu__label">${safeName}</span>
+            <span class="nb-menu__meta">${escapeHtml(metaText)}</span>
           </button>
         `;
-        calculatedHeight += 30;
+        menuItemCount++;
       });
     }
 
-    htmlItems += '<div class="menu-divider"></div>';
-    calculatedHeight += 9;
+    htmlItems += '<div class="nb-menu__divider" role="separator"></div>';
+    menuDividerCount++;
 
     const showAllDownloadsPayload = encodeURIComponent(JSON.stringify({ url: 'napture://downloads', newTab: true }));
     htmlItems += `
-      <button class="menu-item" data-action="open-url" data-payload="${showAllDownloadsPayload}">
-        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-          <polyline points="7 10 12 15 17 10"></polyline>
-          <line x1="12" y1="15" x2="12" y2="3"></line>
-        </svg>
-        <span class="item-title">Show all downloads</span>
-        <span class="menu-meta">Ctrl+J</span>
+      <button class="nb-menu__item" role="menuitem" data-action="open-url" data-payload="${showAllDownloadsPayload}">
+        <span class="nb-menu__icon">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+        </span>
+        <span class="nb-menu__label">Show all downloads</span>
+        <span class="nb-menu__meta">Ctrl+J</span>
       </button>
     `;
-    calculatedHeight += 30;
+    menuItemCount++;
   } else if (type === 'history') {
     const historyList = (typeof searchHistory === 'function' ? searchHistory('') : []) || [];
     const recent = historyList.slice(0, 5);
     if (recent.length === 0) {
-      htmlItems += '<button class="menu-item disabled"><span class="item-title">No recent history</span></button>';
-      calculatedHeight += 30;
+      htmlItems += '<button class="nb-menu__item is-disabled" role="menuitem" aria-disabled="true"><span class="nb-menu__label">No recent history</span></button>';
+      menuItemCount++;
     } else {
       recent.forEach((item) => {
         const safeTitle = escapeHtml(item.title || item.url || 'History Item');
@@ -321,8 +338,8 @@ function showOmnibarPopup(win, type, rect, isLight) {
         } catch(e) {}
         const faviconUrl = item.favicon_url || (domain ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32` : '');
         const iconMarkup = faviconUrl
-          ? `<img src="${faviconUrl}" width="15" height="15" style="flex-shrink: 0; object-fit: contain; border-radius: 2px;" onerror="this.style.display='none'" />`
-          : `<svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+          ? `<img src="${faviconUrl}" width="15" height="15" alt="" onerror="this.style.display='none'" />`
+          : `<svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="12" cy="12" r="10"></circle>
               <polyline points="12 6 12 12 16 14"></polyline>
             </svg>`;
@@ -335,42 +352,46 @@ function showOmnibarPopup(win, type, rect, isLight) {
         }
         const itemPayloadStr = encodeURIComponent(JSON.stringify({ url: item.url, newTab: false }));
         htmlItems += `
-          <button class="menu-item" data-action="open-url" data-payload="${itemPayloadStr}">
-            ${iconMarkup}
-            <span class="item-title">${safeTitle}</span>
-            ${timeStr ? `<span class="menu-meta">${escapeHtml(timeStr)}</span>` : ''}
+          <button class="nb-menu__item" role="menuitem" data-action="open-url" data-payload="${itemPayloadStr}">
+            <span class="nb-menu__icon">${iconMarkup}</span>
+            <span class="nb-menu__label">${safeTitle}</span>
+            ${timeStr ? `<span class="nb-menu__meta">${escapeHtml(timeStr)}</span>` : ''}
           </button>
         `;
-        calculatedHeight += 30;
+        menuItemCount++;
       });
     }
 
-    htmlItems += '<div class="menu-divider"></div>';
-    calculatedHeight += 9;
+    htmlItems += '<div class="nb-menu__divider" role="separator"></div>';
+    menuDividerCount++;
 
     const showAllHistoryPayload = encodeURIComponent(JSON.stringify({ url: 'napture://history', newTab: true }));
     htmlItems += `
-      <button class="menu-item" data-action="open-url" data-payload="${showAllHistoryPayload}">
-        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
-        <span class="item-title">Show all history</span>
-        <span class="menu-meta">Ctrl+H</span>
+      <button class="nb-menu__item" role="menuitem" data-action="open-url" data-payload="${showAllHistoryPayload}">
+        <span class="nb-menu__icon">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+            <circle cx="12" cy="12" r="10"></circle>
+            <polyline points="12 6 12 12 16 14"></polyline>
+          </svg>
+        </span>
+        <span class="nb-menu__label">Show all history</span>
+        <span class="nb-menu__meta">Ctrl+H</span>
       </button>
-      <button class="menu-item" data-action="clear-history">
-        <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
-          <polyline points="3 6 5 6 21 6"></polyline>
-          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-        </svg>
-        <span class="item-title">Clear recent history</span>
+      <button class="nb-menu__item" role="menuitem" data-action="clear-history">
+        <span class="nb-menu__icon">
+          <svg viewBox="0 0 24 24" width="15" height="15" stroke="currentColor" stroke-width="2" fill="none">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+        </span>
+        <span class="nb-menu__label">Clear recent history</span>
       </button>
     `;
-    calculatedHeight += 60;
+    menuItemCount += 2;
   }
 
   const menuWidth = 300;
-  const menuHeight = calculatedHeight;
+  const menuHeight = menuOuterHeight(menuItemCount, menuDividerCount);
 
   let x = winContentBounds.width - menuWidth - 10;
   let y = 54;
@@ -418,18 +439,7 @@ function showOmnibarPopup(win, type, rect, isLight) {
   state.isOmnibarPopupVisible = true;
   state.activeOmnibarPopupType = type;
 
-  const cardBg = isLight
-    ? 'rgba(255, 255, 255, 0.94)'
-    : 'rgba(23, 23, 32, 0.88)';
-  const cardBorder = isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.12)';
-  const cardShadow = isLight
-    ? 'inset 0 1px 0 rgba(255, 255, 255, 0.6)'
-    : 'inset 0 1px 0 rgba(255, 255, 255, 0.1)';
-  const itemColor = isLight ? '#2e3440' : '#c0caf5';
-  const itemHoverBg = isLight ? 'rgba(0, 0, 0, 0.07)' : 'rgba(255, 255, 255, 0.09)';
-  const itemHoverColor = isLight ? '#0f141c' : '#ffffff';
-
-  const argsArray = [htmlItems, cardBg, cardBorder, cardShadow, itemColor, itemHoverBg, itemHoverColor, isLight];
+  const argsArray = [htmlItems, isLight];
 
   const updateScript = `(function() {
     const args = ${JSON.stringify(argsArray)};
@@ -493,87 +503,35 @@ function ensureContextMenuOverlay(win, state) {
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
+    /* Tokens and components: napture/styles/design-system.css */
+    ${getDesignSystemCss()}
     html, body {
       width: 100%;
       height: 100%;
       overflow: hidden;
       background: transparent !important;
-      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       margin: 0;
       padding: 0;
     }
-    .napture-dropdown-menu {
+    /* The overlay view is sized to the menu, so the menu fills it. */
+    .nb-menu {
       position: absolute;
-      top: 0;
-      left: 0;
+      inset: 0;
       width: 100%;
       height: 100%;
-      border-radius: 14px;
-      padding: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      box-sizing: border-box;
-      background: rgba(23, 23, 32, 0.88);
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(28px) saturate(190%);
-      -webkit-backdrop-filter: blur(28px) saturate(190%);
       transform-origin: top left;
-      animation: menuFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+      animation: nb-pop-in var(--nb-duration-fast) var(--nb-ease-out);
     }
-    .napture-dropdown-menu.animate {
-      animation: menuFadeIn 0.12s cubic-bezier(0.16, 1, 0.3, 1);
+    .nb-menu.is-hidden {
+      display: none !important;
     }
-    @keyframes menuFadeIn {
-      from {
-        opacity: 0;
-        transform: scale(0.96);
-      }
-      to {
-        opacity: 1;
-        transform: scale(1);
-      }
-    }
-    .menu-item {
-      width: 100%;
-      height: 28px;
-      min-height: 28px;
-      background: transparent;
-      border: none;
-      border-radius: 7px;
-      display: flex;
-      align-items: center;
-      padding: 0 10px;
-      gap: 10px;
-      font-size: 13px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-      text-align: left;
-      transition: background 0.12s ease, color 0.12s ease;
-      box-sizing: border-box;
-    }
-    .menu-item > span:first-child {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      flex: 1;
-    }
-    .menu-item.disabled {
-      opacity: 0.4;
-      cursor: default;
-      pointer-events: none;
-    }
-    .menu-divider {
-      height: 1px;
-      margin: 3px 6px;
-      flex-shrink: 0;
+    .nb-menu.animate {
+      animation: nb-pop-in var(--nb-duration-fast) var(--nb-ease-out);
     }
   </style>
 </head>
 <body>
-  <div class="napture-dropdown-menu" id="menuContainer"></div>
+  <div class="nb-menu" id="menuContainer" role="menu"></div>
   <script>
     function triggerAction(index) {
       if (window.naptureAPI && window.naptureAPI.contextMenuAction) {
@@ -583,35 +541,24 @@ function ensureContextMenuOverlay(win, state) {
     window.hideContent = function() {
       const container = document.getElementById('menuContainer');
       if (container) {
-        container.style.display = 'none';
+        container.classList.add('is-hidden');
         container.classList.remove('animate');
       }
     };
     window.pendingUpdate = null;
-    window.updateContent = function(html, bg, border, shadow, itemColor, itemHoverBg, itemHoverColor, isLight) {
+    // The design system owns the menu skin; this only supplies content + theme.
+    window.updateContent = function(html, isLight) {
        window.pendingUpdate = null;
        const container = document.getElementById('menuContainer');
        if (!container) return;
-       container.style.display = 'none';
+       container.classList.add('is-hidden');
        container.classList.remove('animate');
 
+       document.documentElement.setAttribute('data-nb-theme', isLight ? 'light' : 'dark');
        container.innerHTML = html;
-       container.style.background = bg;
-       container.style.border = '1px solid ' + border;
-       container.style.boxShadow = shadow;
-       
-       let styleTag = document.getElementById('dynamic-styles');
-       if (!styleTag) {
-          styleTag = document.createElement('style');
-          styleTag.id = 'dynamic-styles';
-          document.head.appendChild(styleTag);
-       }
-       styleTag.innerHTML = '.menu-item { color: ' + itemColor + ' !important; } ' +
-                            '.menu-item:hover:not(.disabled) { background: ' + itemHoverBg + ' !important; color: ' + itemHoverColor + ' !important; } ' +
-                            '.menu-divider { background: ' + border + ' !important; }';
 
-       container.style.display = 'flex';
        void container.offsetWidth;
+       container.classList.remove('is-hidden');
        container.classList.add('animate');
     };
     if (window.pendingUpdate) {
@@ -621,13 +568,13 @@ function ensureContextMenuOverlay(win, state) {
       if (e.key === 'Escape') triggerAction(-1);
     });
     document.addEventListener('pointerdown', (e) => {
-      if (!e.target.closest('.menu-item')) {
+      if (!e.target.closest('.nb-menu__item')) {
         triggerAction(-1);
       }
     });
     document.addEventListener('contextmenu', (e) => {
       e.preventDefault();
-      if (!e.target.closest('.menu-item')) {
+      if (!e.target.closest('.nb-menu__item')) {
         triggerAction(-1);
       }
     });
@@ -672,19 +619,20 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
     currentContextMenuTarget = webContentsTarget;
     contextMenuActions.clear();
 
-    let calculatedHeight = 10;
+    let menuItemCount = 0;
+    let menuDividerCount = 0;
     let htmlItems = '';
     template.forEach((item, index) => {
       if (!item) return;
       if (item.type === 'separator') {
-        calculatedHeight += 9;
-        htmlItems += '<div class="menu-divider"></div>';
+        menuDividerCount++;
+        htmlItems += '<div class="nb-menu__divider" role="separator"></div>';
       } else {
-        calculatedHeight += 30;
+        menuItemCount++;
         contextMenuActions.set(index, item);
         let accelHtml = '';
         if (item.accelerator) {
-          accelHtml = `<span style="margin-left:auto; opacity:0.45; font-size:11px; font-weight:400; flex-shrink: 0; padding-left: 8px;">${escapeHtml(item.accelerator)}</span>`;
+          accelHtml = `<span class="nb-menu__meta">${escapeHtml(item.accelerator)}</span>`;
         }
         let label = item.label;
         if (!label && item.role) {
@@ -692,11 +640,11 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
           else label = item.role.charAt(0).toUpperCase() + item.role.slice(1);
         }
         if (!label) label = 'Item';
-        let disabledClass = item.enabled === false ? 'disabled' : '';
+        const isDisabled = item.enabled === false;
 
         htmlItems += `
-          <button class="menu-item ${disabledClass}" onclick="if(!this.classList.contains('disabled')) { triggerAction(${index}); }">
-            <span>${escapeHtml(label)}</span>
+          <button class="nb-menu__item${isDisabled ? ' is-disabled' : ''}" role="menuitem"${isDisabled ? ' aria-disabled="true"' : ''} onclick="if(!this.classList.contains('is-disabled')) { triggerAction(${index}); }">
+            <span class="nb-menu__label">${escapeHtml(label)}</span>
             ${accelHtml}
           </button>
         `;
@@ -704,19 +652,9 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
     });
 
     const isLight = !nativeTheme.shouldUseDarkColors;
-    const cardBg = isLight
-      ? 'rgba(255, 255, 255, 0.94)'
-      : 'rgba(23, 23, 32, 0.88)';
-    const cardBorder = isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.12)';
-    const cardShadow = isLight
-      ? 'inset 0 1px 0 rgba(255, 255, 255, 0.6)'
-      : 'inset 0 1px 0 rgba(255, 255, 255, 0.1)';
-    const itemColor = isLight ? '#2e3440' : '#c0caf5';
-    const itemHoverBg = isLight ? 'rgba(0, 0, 0, 0.07)' : 'rgba(255, 255, 255, 0.09)';
-    const itemHoverColor = isLight ? '#0f141c' : '#ffffff';
 
     const menuWidth = 215;
-    const menuHeight = calculatedHeight + 10;
+    const menuHeight = menuOuterHeight(menuItemCount, menuDividerCount);
 
     const winContentBounds = win.getContentBounds ? win.getContentBounds() : win.getBounds();
     let finalX = typeof x === 'number' ? Math.round(x) : 100;
@@ -748,7 +686,7 @@ function showCustomContextMenu(template, x, y, webContentsTarget) {
       try { contextMenuView.webContents.invalidate(); } catch(e) {}
     }
 
-    const argsArray = [htmlItems, cardBg, cardBorder, cardShadow, itemColor, itemHoverBg, itemHoverColor, isLight];
+    const argsArray = [htmlItems, isLight];
 
     const updateScript = `(function() {
       const args = ${JSON.stringify(argsArray)};
@@ -1370,10 +1308,6 @@ function initSuggestionsView(win, state) {
   state.suggestionsView.setBackgroundColor('#00000000');
   state.isSuggestionsViewLoaded = false;
 
-  const cardBg = 'rgba(23, 23, 32, 0.88)';
-  const cardBorder = 'rgba(255, 255, 255, 0.12)';
-  const cardShadow = '0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06)';
-
   const popupHtml = `<!DOCTYPE html>
 <html>
 <head>
@@ -1384,122 +1318,32 @@ function initSuggestionsView(win, state) {
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    /* Tokens and components: napture/styles/design-system.css */
+    ${getDesignSystemCss()}
     html, body {
-      font-family: "Outfit", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       background: transparent !important;
       overflow: hidden;
       margin: 0;
+      /* The view is offset by this padding to leave room for the card shadow. */
       padding: 16px;
       width: 100vw;
       height: 100vh;
     }
-    .suggestions-card {
-      background: ${cardBg};
-      backdrop-filter: blur(28px) saturate(190%);
-      -webkit-backdrop-filter: blur(28px) saturate(190%);
-      border: 1px solid ${cardBorder};
-      border-radius: 14px;
-      box-shadow: ${cardShadow};
-      overflow: hidden;
-      padding: 6px;
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-      transition: background 0.2s ease, border-color 0.2s ease;
-    }
-    .sug-item {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      padding: 0 12px;
-      height: 36px;
-      border-radius: 9px;
-      font-size: 13px;
-      font-weight: 500;
-      color: #a9b1d6;
-      cursor: pointer;
-      position: relative;
-      transition: background 0.12s ease, color 0.12s ease, transform 0.1s ease;
-    }
-    .sug-item:hover {
-      background: rgba(255, 255, 255, 0.08);
-      color: #ffffff;
-    }
-    .sug-item:active {
-      transform: scale(0.99);
-    }
-    .sug-item.selected {
-      background: rgba(127, 140, 255, 0.18) !important;
-      color: #ffffff !important;
-    }
-    .sug-item.selected::before {
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 6px;
-      bottom: 6px;
-      width: 3px;
-      border-radius: 0 3px 3px 0;
-      background: #7f8cff;
-    }
-    .sug-icon {
-      width: 14px;
-      height: 14px;
-      stroke: #8f90a6;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: stroke 0.12s ease;
-    }
-    .sug-item:hover .sug-icon,
-    .sug-item.selected .sug-icon {
-      stroke: #7f8cff;
-    }
-    .sug-text {
-      flex: 1;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      letter-spacing: -0.01em;
-    }
   </style>
 </head>
 <body>
-  <div id="card" class="suggestions-card"></div>
+  <div id="card" class="nb-card nb-card--glass nb-card--list" role="listbox"></div>
   <script>
     function selectSug(sug) {
       if (window.naptureAPI && window.naptureAPI.selectSuggestion) {
         window.naptureAPI.selectSuggestion(sug);
       }
     }
-    window.updateContent = function(html, bg, border, shadow, itemColor, itemHoverBg, itemHoverColor, iconColor, isLight) {
+    // The design system owns the card and row skin; this supplies content + theme.
+    window.updateContent = function(html, isLight) {
+      document.documentElement.setAttribute('data-nb-theme', isLight ? 'light' : 'dark');
       const card = document.getElementById('card');
-      if (card) {
-        card.style.background = bg;
-        card.style.borderColor = border;
-        card.style.boxShadow = shadow;
-        card.innerHTML = html;
-      }
-      let styleTag = document.getElementById('dynamic-styles');
-      if (!styleTag) {
-        styleTag = document.createElement('style');
-        styleTag.id = 'dynamic-styles';
-        document.head.appendChild(styleTag);
-      }
-      if (isLight) {
-        styleTag.innerHTML = '.sug-item { color: ' + itemColor + ' !important; } ' +
-                             '.sug-item:hover { background: ' + itemHoverBg + ' !important; color: ' + itemHoverColor + ' !important; } ' +
-                             '.sug-item.selected { background: rgba(127, 140, 255, 0.22) !important; color: #111827 !important; } ' +
-                             '.sug-icon svg { stroke: ' + iconColor + ' !important; } ' +
-                             '.sug-item:hover .sug-icon svg, .sug-item.selected .sug-icon svg { stroke: #6366f1 !important; }';
-      } else {
-        styleTag.innerHTML = '.sug-item { color: ' + itemColor + ' !important; } ' +
-                             '.sug-item:hover { background: ' + itemHoverBg + ' !important; color: ' + itemHoverColor + ' !important; } ' +
-                             '.sug-item.selected { background: rgba(127, 140, 255, 0.18) !important; color: #ffffff !important; } ' +
-                             '.sug-icon svg { stroke: ' + iconColor + ' !important; } ' +
-                             '.sug-item:hover .sug-icon svg, .sug-item.selected .sug-icon svg { stroke: #7f8cff !important; }';
-      }
+      if (card) card.innerHTML = html;
     };
   </script>
 </body>
@@ -3767,27 +3611,19 @@ ipcMain.on('update-suggestions-overlay', (event, { suggestions, bounds, isLight,
       : `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>`;
 
     return `
-      <div class="sug-item ${isSelected ? 'selected' : ''}" data-index="${idx}" onmousedown="event.preventDefault(); selectSug('${jsEscaped}')" onclick="selectSug('${jsEscaped}')">
-        <div class="sug-icon">${iconSvg}</div>
-        <span class="sug-text">${escaped}</span>
+      <div class="nb-list-item${isSelected ? ' is-highlighted' : ''}" role="option" aria-selected="${isSelected ? 'true' : 'false'}" data-index="${idx}" onmousedown="event.preventDefault(); selectSug('${jsEscaped}')" onclick="selectSug('${jsEscaped}')">
+        <span class="nb-list-item__icon">${iconSvg}</span>
+        <span class="nb-list-item__title">${escaped}</span>
       </div>
     `;
   }).join('');
-
-  const cardBg = isLight ? 'rgba(255, 255, 255, 0.94)' : 'rgba(22, 23, 32, 0.88)';
-  const cardBorder = isLight ? 'rgba(0, 0, 0, 0.12)' : 'rgba(255, 255, 255, 0.12)';
-  const cardShadow = isLight ? '0 16px 40px rgba(0, 0, 0, 0.16), 0 0 0 1px rgba(0, 0, 0, 0.06)' : '0 16px 40px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.06)';
-  const itemColor = isLight ? '#374151' : '#a9b1d6';
-  const itemHoverBg = isLight ? 'rgba(0, 0, 0, 0.05)' : 'rgba(255, 255, 255, 0.08)';
-  const itemHoverColor = isLight ? '#111827' : '#ffffff';
-  const iconColor = isLight ? '#6b7280' : '#8f90a6';
 
   if (!win.contentView.children.includes(suggestionsView)) {
     win.contentView.addChildView(suggestionsView);
   }
   suggestionsView.setBounds({ x, y, width, height });
 
-  const script = `if (window.updateContent) { window.updateContent(${JSON.stringify(itemsHtml)}, ${JSON.stringify(cardBg)}, ${JSON.stringify(cardBorder)}, ${JSON.stringify(cardShadow)}, ${JSON.stringify(itemColor)}, ${JSON.stringify(itemHoverBg)}, ${JSON.stringify(itemHoverColor)}, ${JSON.stringify(iconColor)}, ${isLight ? 'true' : 'false'}); }`;
+  const script = `if (window.updateContent) { window.updateContent(${JSON.stringify(itemsHtml)}, ${isLight ? 'true' : 'false'}); }`;
   suggestionsView.webContents.executeJavaScript(script).catch(() => {});
 });
 
@@ -5064,7 +4900,7 @@ function getImporterHtml(logoBase64, browserName) {
   const titleName = browserTitles[(browserName || 'all').toLowerCase()] || (browserName || 'Browser');
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-nb-surface="chrome">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -5073,16 +4909,12 @@ function getImporterHtml(logoBase64, browserName) {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
+    /* Tokens and components: napture/styles/design-system.css */
+    ${getDesignSystemCss()}
+    /* This window is a small solid frame, not a translucent chrome layer. */
     :root {
-      --bg-app: #0F0F14;
-      --bg-card: rgba(18, 19, 26, 0.85);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --text-primary: #ffffff;
-      --text-secondary: #a9b1d6;
-      --text-muted: #8F90A6;
-      --accent: #7f8cff;
-      --accent-glow: rgba(127, 140, 255, 0.35);
-      --font-main: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      --nb-bg-app: #0F0F14;
+      --nb-bg-card: rgba(18, 19, 26, 0.85);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
@@ -5126,7 +4958,7 @@ function getImporterHtml(logoBase64, browserName) {
       width: 44px;
       height: 44px;
       object-fit: contain;
-      filter: drop-shadow(0 4px 12px var(--accent-glow));
+      filter: drop-shadow(0 4px 12px var(--nb-accent-glow));
       animation: pulse 2.4s infinite ease-in-out;
     }
     .brand-text {
@@ -5173,7 +5005,7 @@ function getImporterHtml(logoBase64, browserName) {
       height: 100%;
       width: 0%;
       background: linear-gradient(90deg, #6c7af7 0%, #7f8cff 50%, #9ca8ff 100%);
-      box-shadow: 0 0 12px var(--accent-glow);
+      box-shadow: 0 0 12px var(--nb-accent-glow);
       border-radius: 4px;
       transition: width 0.2s cubic-bezier(0.1, 0.8, 0.1, 1);
     }
@@ -5193,7 +5025,7 @@ function getImporterHtml(logoBase64, browserName) {
     @keyframes pulse {
       0%, 100% {
         transform: scale(1);
-        filter: drop-shadow(0 4px 12px var(--accent-glow));
+        filter: drop-shadow(0 4px 12px var(--nb-accent-glow));
       }
       50% {
         transform: scale(1.05);

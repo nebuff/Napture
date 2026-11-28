@@ -1,24 +1,37 @@
-// Reusable UI Component Generators
+// Napture Shared UI Helpers
+// Loads the ONE global design system stylesheet so every generated page in the
+// browser (settings, downloads, history, updater, popups) is guaranteed to be
+// rendered by the same token set and component library.
 const fs = require('fs');
 const path = require('path');
 
-let _cachedThemeCss = null;
+const DESIGN_SYSTEM_PATH = path.join(__dirname, '..', '..', 'styles', 'design-system.css');
 
+let _cachedDesignSystemCss = null;
+
+/** The complete design system, as CSS text. */
 function getSharedThemeCss() {
-  if (_cachedThemeCss) return _cachedThemeCss;
+  if (_cachedDesignSystemCss) return _cachedDesignSystemCss;
   try {
-    const cssPath = path.join(__dirname, '..', '..', 'styles', 'themes.css');
-    if (fs.existsSync(cssPath)) {
-      _cachedThemeCss = fs.readFileSync(cssPath, 'utf8');
-      return _cachedThemeCss;
+    if (fs.existsSync(DESIGN_SYSTEM_PATH)) {
+      _cachedDesignSystemCss = fs.readFileSync(DESIGN_SYSTEM_PATH, 'utf8');
+      return _cachedDesignSystemCss;
     }
-  } catch(e) {
-    console.error('Failed to load shared theme css:', e);
+    console.error('[DesignSystem] design-system.css not found at', DESIGN_SYSTEM_PATH);
+  } catch (e) {
+    console.error('[DesignSystem] Failed to load design-system.css:', e);
   }
   return '';
 }
 
-function generateCommonHead(title) {
+/** Back-compat alias — older call sites used this name. */
+const getSharedDesignSystemCss = getSharedThemeCss;
+
+/**
+ * Common <head> contents for a generated Napture page.
+ * `surface` selects the token scope: 'chrome' (translucent) or 'page' (opaque).
+ */
+function generateCommonHead(title, surface = 'page') {
   const sharedCss = getSharedThemeCss();
   return `
   <meta charset="UTF-8">
@@ -31,10 +44,13 @@ function generateCommonHead(title) {
   <style>
     ${sharedCss}
   </style>
+  <script>document.documentElement.setAttribute('data-nb-surface', '${surface}');</script>
   `;
 }
 
 module.exports = {
+  DESIGN_SYSTEM_PATH,
   getSharedThemeCss,
+  getSharedDesignSystemCss,
   generateCommonHead
 };

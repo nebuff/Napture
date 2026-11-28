@@ -37,23 +37,15 @@ beforeEach(() => {
 
 describe('Omnibar popup overlay UI', () => {
   describe('content rendering', () => {
-    it('injects markup, applies theme colors and reports the clamped height', () => {
-      window.updateContent(
-        '<button class="menu-item">One</button>',
-        'rgb(10, 20, 30)',
-        'rgb(40, 50, 60)',
-        '0 1px 2px #000',
-        '#ffffff',
-        '#111111',
-        '#222222',
-        true
-      );
+    it('injects markup, applies the theme and reports the clamped height', () => {
+      window.updateContent('<button class="nb-menu__item">One</button>', true);
 
       expect(document.body.className).toBe('light-theme');
+      expect(document.documentElement.getAttribute('data-nb-theme')).toBe('light');
       expect(container.innerHTML).toContain('One');
-      expect(container.style.background).toBe('rgb(10, 20, 30)');
-      expect(container.style.borderColor).toBe('rgb(40, 50, 60)');
-      expect(container.style.boxShadow).toBe('0 1px 2px #000');
+      // The design system owns the menu skin; the overlay must not inline colors.
+      expect(container.style.background).toBe('');
+      expect(container.style.borderColor).toBe('');
       // jsdom has no layout, so this exercises the 60px minimum clamp.
       expect(api.setOmnibarPopupHeight).toHaveBeenCalledWith(60);
     });
@@ -61,14 +53,14 @@ describe('Omnibar popup overlay UI', () => {
     it('caps the reported height at 460px', () => {
       Object.defineProperty(container, 'scrollHeight', { value: 900, configurable: true });
 
-      window.updateContent('<div>tall</div>', null, null, null, '#fff', '#000', '#111', false);
+      window.updateContent('<div>tall</div>', false);
 
       expect(document.body.className).toBe('dark-theme');
       expect(api.setOmnibarPopupHeight).toHaveBeenCalledWith(460);
     });
 
     it('clears the overlay on hidePopup', () => {
-      window.updateContent('<span>visible</span>', null, null, null, '#fff', '#000', '#111', false);
+      window.updateContent('<span>visible</span>', false);
       expect(container.innerHTML).toContain('visible');
 
       window.hidePopup();
@@ -94,7 +86,7 @@ describe('Omnibar popup overlay UI', () => {
       await flush();
 
       expect(document.body.className).toBe('dark-theme');
-      expect(container.querySelectorAll('#omnibar-downloads-list .menu-item')).toHaveLength(5);
+      expect(container.querySelectorAll('#omnibar-downloads-list .nb-menu__item')).toHaveLength(5);
       expect(container.textContent).toContain('report.pdf');
       expect(container.textContent).toContain('2.1 MB');
       expect(container.textContent).toContain('42%');
@@ -108,7 +100,7 @@ describe('Omnibar popup overlay UI', () => {
 
       window.showPopup('downloads', false);
       await flush();
-      container.querySelector('#omnibar-downloads-list .menu-item').click();
+      container.querySelector('#omnibar-downloads-list .nb-menu__item').click();
 
       expect(api.omnibarPopupAction).toHaveBeenCalledWith('open-download', {
         id: 'd1',
@@ -171,10 +163,10 @@ describe('Omnibar popup overlay UI', () => {
       await flush();
 
       expect(document.body.className).toBe('light-theme');
-      expect(container.querySelectorAll('#omnibar-history-list .menu-item')).toHaveLength(5);
+      expect(container.querySelectorAll('#omnibar-history-list .nb-menu__item')).toHaveLength(5);
       expect(container.textContent).not.toContain('Extra');
 
-      container.querySelector('#omnibar-history-list .menu-item').click();
+      container.querySelector('#omnibar-history-list .nb-menu__item').click();
 
       expect(api.omnibarPopupAction).toHaveBeenCalledWith('open-url', {
         url: 'https://news.ycombinator.com',
@@ -204,7 +196,11 @@ describe('Omnibar popup overlay UI', () => {
       window.showPopup('history', false);
       await flush();
 
-      expect(container.querySelector('img')).toBeNull();
+      // The favicon is the only <img> the renderer adds; the title itself must
+      // never become markup, so no injected src=x element may exist.
+      const images = container.querySelectorAll('img');
+      expect(images).toHaveLength(1);
+      expect(images[0].getAttribute('src')).toContain('google.com/s2/favicons');
       expect(container.textContent).toContain('<img src=x');
       expect(window.__xss).toBeUndefined();
     });

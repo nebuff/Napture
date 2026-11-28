@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-nb-surface="chrome">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,27 +7,17 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles/design-system.css">
   <style>
+    /* The updater is a small solid window, not a translucent chrome layer. */
     :root {
-      --bg-app: #0F0F14;
-      --bg-card: rgba(18, 19, 26, 0.85);
-      --border-color: rgba(255, 255, 255, 0.08);
-      --text-primary: #ffffff;
-      --text-secondary: #a9b1d6;
-      --text-muted: #8F90A6;
-      --accent: #7f8cff;
-      --accent-glow: rgba(127, 140, 255, 0.35);
-      --font-main: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
+      --nb-bg-app: #0F0F14;
+      --nb-bg-card: rgba(18, 19, 26, 0.85);
     }
     body {
-      background-color: var(--bg-app);
-      color: var(--text-primary);
-      font-family: var(--font-main);
+      background-color: var(--nb-bg-app);
+      color: var(--nb-text-primary);
+      font-family: var(--nb-font-display);
       height: 100vh;
       display: flex;
       flex-direction: column;
@@ -36,8 +26,8 @@
       user-select: none;
       overflow: hidden;
       -webkit-font-smoothing: antialiased;
-      border: 1px solid var(--border-color);
-      border-radius: 12px;
+      border: 1px solid var(--nb-border);
+      border-radius: var(--nb-radius-xl);
       -webkit-app-region: drag;
     }
     .updater-card {
@@ -47,25 +37,25 @@
       flex-direction: column;
       align-items: center;
       text-align: center;
-      background: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 16px;
+      background: var(--nb-bg-card);
+      border: 1px solid var(--nb-border);
+      border-radius: var(--nb-radius-3xl);
       padding: 28px 24px;
-      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
-      backdrop-filter: blur(12px);
+      box-shadow: var(--nb-shadow-lg);
+      backdrop-filter: var(--nb-blur-sm);
       -webkit-app-region: no-drag;
     }
     .brand-group {
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 20px;
+      gap: var(--nb-space-5);
+      margin-bottom: var(--nb-space-8);
     }
     .brand-logo {
       width: 44px;
       height: 44px;
       object-fit: contain;
-      filter: drop-shadow(0 4px 12px var(--accent-glow));
+      filter: drop-shadow(0 4px 12px var(--nb-accent-glow));
       animation: pulse 2.4s infinite ease-in-out;
     }
     .brand-text {
@@ -74,47 +64,51 @@
       align-items: flex-start;
     }
     .brand-title {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--text-primary);
-      letter-spacing: -0.3px;
-      line-height: 1.2;
+      font-size: var(--nb-text-xl);
+      font-weight: var(--nb-weight-bold);
+      color: var(--nb-text-primary);
+      letter-spacing: var(--nb-tracking-tight);
+      line-height: var(--nb-leading-tight);
     }
     .brand-author {
-      font-size: 11px;
-      font-weight: 500;
-      color: var(--text-muted);
-      letter-spacing: 0.2px;
+      font-size: var(--nb-text-xs);
+      font-weight: var(--nb-weight-medium);
+      color: var(--nb-text-muted);
     }
     .status-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text-primary);
-      margin-bottom: 6px;
+      font-size: var(--nb-text-md);
+      font-weight: var(--nb-weight-semibold);
+      color: var(--nb-text-primary);
+      margin-bottom: var(--nb-space-3);
     }
     .status-subtitle {
-      font-size: 12px;
-      color: var(--text-secondary);
-      margin-bottom: 20px;
+      font-size: var(--nb-text-sm);
+      color: var(--nb-text-secondary);
+      margin-bottom: var(--nb-space-8);
       min-height: 18px;
     }
     .progress-track {
       width: 100%;
       height: 8px;
-      background: #171822;
-      border: 1px solid var(--border-color);
-      border-radius: 4px;
+      background: var(--nb-bg-input);
+      border: 1px solid var(--nb-border);
+      border-radius: var(--nb-radius-xs);
       overflow: hidden;
-      margin-bottom: 12px;
+      margin-bottom: var(--nb-space-6);
       position: relative;
     }
     .progress-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #6c7af7 0%, #7f8cff 50%, #9ca8ff 100%);
-      box-shadow: 0 0 12px var(--accent-glow);
-      border-radius: 4px;
-      transition: width 0.2s cubic-bezier(0.1, 0.8, 0.1, 1);
+      background: linear-gradient(
+        90deg,
+        var(--nb-accent-hover) 0%,
+        var(--nb-accent) 50%,
+        var(--nb-indigo-300) 100%
+      );
+      box-shadow: 0 0 12px var(--nb-accent-glow);
+      border-radius: var(--nb-radius-xs);
+      transition: width var(--nb-duration-moderate) var(--nb-ease-standard);
     }
     .progress-fill.indeterminate {
       width: 40% !important;
@@ -125,14 +119,14 @@
       display: flex;
       justify-content: space-between;
       width: 100%;
-      font-size: 11px;
-      color: var(--text-secondary);
-      font-weight: 500;
+      font-size: var(--nb-text-xs);
+      color: var(--nb-text-secondary);
+      font-weight: var(--nb-weight-medium);
     }
     @keyframes pulse {
       0%, 100% {
         transform: scale(1);
-        filter: drop-shadow(0 4px 12px var(--accent-glow));
+        filter: drop-shadow(0 4px 12px var(--nb-accent-glow));
       }
       50% {
         transform: scale(1.05);
@@ -224,8 +218,8 @@
         statusTitle.textContent = 'Update failed';
         statusSubtitle.textContent = data.error || 'An error occurred during update.';
         progressBar.classList.remove('indeterminate');
-        progressBar.style.background = '#ff5c5c';
-        progressBar.style.boxShadow = '0 0 12px rgba(255, 92, 92, 0.4)';
+        progressBar.style.background = 'var(--nb-danger)';
+        progressBar.style.boxShadow = '0 0 12px var(--nb-danger-soft)';
         progressBar.style.width = '100%';
         speedVal.textContent = 'Error';
         timeVal.textContent = 'Closing shortly...';
