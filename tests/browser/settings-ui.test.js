@@ -578,3 +578,31 @@ describe('Settings Software Updater UI & Invariants', () => {
   });
 });
 
+describe('Settings UI Search Engine Defaults', () => {
+  beforeEach(() => {
+    jest.resetModules();
+  });
+
+  it('defaults to DuckDuckGo and offers Napture Search as a beta option', () => {
+    const { getDefaultSettings, buildSettingsPage } = require('../../napture/settings-ui');
+
+    expect(getDefaultSettings().searchEngine).toBe('duckduckgo');
+
+    const html = buildSettingsPage();
+    expect(html).toContain('value="duckduckgo" selected');
+    expect(html).toContain('Napture Search (beta)');
+    expect(html).not.toContain('value="napture" selected');
+  });
+
+  it('keeps a stored Napture Search selection instead of resetting it', () => {
+    const history = require('../../napture/db/history');
+    history.getAllSettings.mockReturnValueOnce({ searchEngine: 'napture' });
+
+    const { buildSettingsPage } = require('../../napture/settings-ui');
+    const html = buildSettingsPage();
+
+    expect(html).toContain('value="napture" selected');
+    expect(html).not.toContain('value="duckduckgo" selected');
+  });
+});
+

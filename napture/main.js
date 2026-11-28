@@ -53,6 +53,31 @@ function escapeHtml(str) {
   return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
 }
 
+// Search targets for the address bar, context menu and new tab page.
+// 'napture' resolves to the local results page instead of a remote engine.
+const SEARCH_ENGINE_URLS = {
+  google: 'https://google.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  bing: 'https://www.bing.com/search?q=',
+  brave: 'https://search.brave.com/search?q=',
+  ecosia: 'https://www.ecosia.org/search?q=',
+  napture: 'napture://search?q='
+};
+
+const SEARCH_ENGINE_LABELS = {
+  google: 'Google',
+  duckduckgo: 'DuckDuckGo',
+  bing: 'Bing',
+  brave: 'Brave',
+  ecosia: 'Ecosia',
+  napture: 'Napture Search'
+};
+
+function buildSearchUrl(engine, query) {
+  const base = SEARCH_ENGINE_URLS[engine] || SEARCH_ENGINE_URLS.duckduckgo;
+  return base + encodeURIComponent(String(query || ''));
+}
+
 function hideSuggestionsView(win) {
   if (!win) return;
   const state = getWindowState(win);
@@ -793,13 +818,15 @@ const handleContextMenu = (e, params, targetWebContents) => {
       }
       const selectedText = params.selectionText.trim();
       const shortText = selectedText.length > 25 ? selectedText.substring(0, 25) + '...' : selectedText;
+      const searchEngine = getSetting('searchEngine', 'duckduckgo');
+      const searchEngineLabel = SEARCH_ENGINE_LABELS[searchEngine] || SEARCH_ENGINE_LABELS.duckduckgo;
       template.push({
-        label: `Search Google for "${shortText}"`,
+        label: `Search ${searchEngineLabel} for "${shortText}"`,
         click: () => {
           try {
             const mw = getMainWindow();
             if (mw && !mw.isDestroyed() && mw.webContents && !mw.webContents.isDestroyed()) {
-              const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(selectedText)}`;
+              const searchUrl = buildSearchUrl(searchEngine, selectedText);
               mw.webContents.send('open-url-in-new-tab', { url: searchUrl });
             }
           } catch (err) {

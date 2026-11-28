@@ -1344,6 +1344,7 @@ function getInitialTabTitle(url) {
       if (host === 'settings') return 'Settings';
       if (host === 'about') return 'About Napture';
       if (host === 'history') return 'History';
+      if (host === 'search') return 'Napture Search';
       if (host === 'keyboard' || host === 'shortcuts') return 'Shortcuts';
       if (host === 'error') return 'Problem Loading Page';
       return host || 'Napture';
@@ -1459,6 +1460,7 @@ function openInternalPage(url, title) {
     else if (url.includes('about')) pageTitle = 'About Napture';
     else if (url.includes('keyboard') || url.includes('shortcuts')) pageTitle = 'Keyboard Shortcuts';
     else if (url.includes('history')) pageTitle = 'History';
+    else if (url.includes('search')) pageTitle = 'Napture Search';
     else if (url.includes('downloads')) pageTitle = 'Downloads';
     else pageTitle = 'Napture Page';
   }
@@ -1859,6 +1861,19 @@ function getDefaultFaviconIcon(url) {
   </svg>`;
 }
 
+// The local search page is internal, but unlike settings/history it should
+// replace the current tab rather than open a new one for every query.
+function isSearchUrl(url) {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    const host = (parsed.hostname || '').toLowerCase();
+    return host === 'search' && (parsed.protocol === 'napture:' || parsed.protocol === 'ne:');
+  } catch (e) {
+    return false;
+  }
+}
+
 function isInternalUrl(url) {
   if (!url) return false;
   if (url.startsWith('napture://')) return true;
@@ -1866,7 +1881,7 @@ function isInternalUrl(url) {
     try {
       const u = new URL(url);
       const host = (u.hostname || '').toLowerCase();
-      return !host || ['welcome', 'start', 'newtab', 'settings', 'about', 'history', 'keyboard', 'shortcuts', 'logo', 'error'].includes(host);
+      return !host || ['welcome', 'start', 'newtab', 'settings', 'about', 'history', 'search', 'keyboard', 'shortcuts', 'logo', 'error'].includes(host);
     } catch (e) {
       return false;
     }
@@ -1956,7 +1971,8 @@ function handleAddressSubmit() {
       duckduckgo: 'https://duckduckgo.com/?q=',
       bing: 'https://www.bing.com/search?q=',
       brave: 'https://search.brave.com/search?q=',
-      ecosia: 'https://www.ecosia.org/search?q='
+      ecosia: 'https://www.ecosia.org/search?q=',
+      napture: 'napture://search?q='
     };
     const searchBase = engineUrls[currentSettings.searchEngine] || engineUrls.duckduckgo;
     url = `${searchBase}${encodeURIComponent(url)}`;
@@ -1984,7 +2000,7 @@ function handleAddressSubmit() {
       hideAddressInput();
       return;
     }
-    if (isInternalUrl(url) && !isWelcomeUrl(url) && !isWelcomeUrl(activeTab.url)) {
+    if (isInternalUrl(url) && !isSearchUrl(url) && !isWelcomeUrl(url) && !isWelcomeUrl(activeTab.url)) {
       openInternalPage(url);
       hideAddressInput();
       return;

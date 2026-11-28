@@ -1838,6 +1838,7 @@ function buildSettingsPage() {
                 <option value="bing" ${settings.searchEngine === 'bing' ? 'selected' : ''}>Microsoft Bing</option>
                 <option value="brave" ${settings.searchEngine === 'brave' ? 'selected' : ''}>Brave Search</option>
                 <option value="ecosia" ${settings.searchEngine === 'ecosia' ? 'selected' : ''}>Ecosia</option>
+                <option value="napture" ${settings.searchEngine === 'napture' ? 'selected' : ''}>Napture Search (beta)</option>
               </select>
             </div>
           </div>

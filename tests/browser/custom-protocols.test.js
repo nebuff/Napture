@@ -8,6 +8,11 @@ jest.mock('electron', () => ({
   }
 }));
 
+// Keep the protocol tests offline: the search route performs web lookups.
+jest.mock('../../napture/web-search', () => ({
+  searchWeb: jest.fn(async () => ({ results: [], providers: [] }))
+}));
+
 const { getRouteFromUrl, handleCustomProtocolRequest } = require('../../napture/protocol-handler');
 
 describe('Custom Protocol Handlers & Route Resolution', () => {
@@ -26,6 +31,12 @@ describe('Custom Protocol Handlers & Route Resolution', () => {
     it('resolves history route for napture://history', () => {
       expect(getRouteFromUrl('napture://history')).toBe('history');
       expect(getRouteFromUrl('ne://history')).toBe('history');
+    });
+
+    it('resolves search route for napture://search with and without a query', () => {
+      expect(getRouteFromUrl('napture://search')).toBe('search');
+      expect(getRouteFromUrl('napture://search?q=sqlite')).toBe('search');
+      expect(getRouteFromUrl('ne://search?q=sqlite')).toBe('search');
     });
 
     it('resolves keyboard shortcuts route for napture://keyboard', () => {
@@ -100,6 +111,54 @@ describe('Custom Protocol Handlers & Route Resolution', () => {
       const text = await res.text();
       expect(text).toContain('<!DOCTYPE html>');
       expect(text).toContain('History');
+    });
+
+    it('points the new tab search box at the local search page when Napture Search is selected', async () => {
+      const history = require('../../napture/db/history');
+      const previous = history.getSetting('searchEngine', 'duckduckgo');
+      history.setSetting('searchEngine', 'napture');
+      try {
+        const res = handleCustomProtocolRequest({ url: 'napture://welcome' });
+        const text = await res.text();
+
+        expect(text).toContain('napture://search?q=');
+        expect(text).not.toContain('duckduckgo.com/?q=');
+        expect(text).toContain('id="sf"');
+      } finally {
+        history.setSetting('searchEngine', previous);
+      }
+    });
+
+    it('renders the local search page for napture://search', async () => {
+      const res = await handleCustomProtocolRequest({ url: 'napture://search?q=sqlite' });
+      expect(res.headers.get('Content-Type')).toContain('text/html');
+
+      const text = await res.text();
+      expect(text).toContain('<!DOCTYPE html>');
+      expect(text).toContain('Napture Search');
+      expect(text).toContain('id="search-input"');
+      expect(text).toContain('See all results for');
+    });
+
+    it('renders web results returned by the search providers', async () => {
+      const { searchWeb } = require('../../napture/web-search');
+      searchWeb.mockResolvedValueOnce({
+        results: [{
+          title: 'SQLite Home Page',
+          url: 'https://sqlite.org/index.html',
+          snippet: 'A small, fast SQL database engine',
+          sourceLabel: 'Bing'
+        }],
+        providers: [{ id: 'bing', label: 'Bing', ok: true, count: 1 }]
+      });
+
+      const res = await handleCustomProtocolRequest({ url: 'napture://search?q=sqlite' });
+      const text = await res.text();
+
+      expect(text).toContain('Web results');
+      expect(text).toContain('SQLite Home Page');
+      expect(text).toContain('https://sqlite.org/index.html');
+      expect(text).toContain('Web: Bing');
     });
 
     it('returns text/html response for napture://update-force', async () => {

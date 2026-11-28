@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const { buildSettingsPage } = require('./settings-ui');
 const { buildHistoryPage } = require('./history-ui');
+const { buildSearchPage } = require('./search-ui');
+const { searchWeb } = require('./web-search');
 const { buildDownloadsPage } = require('./downloads-ui');
 const { getSetting } = require('./db/history');
 const i18n = require('./i18n');
@@ -66,6 +68,7 @@ function getRouteFromUrl(requestUrl) {
       if (['about'].includes(c)) return 'about';
       if (['settings'].includes(c)) return 'settings';
       if (['history'].includes(c)) return 'history';
+      if (['search'].includes(c)) return 'search';
       if (['keyboard', 'shortcuts'].includes(c)) return 'keyboard';
       if (['update-force', 'force-update', 'updateforce'].includes(c)) return 'update-force';
       if (['logo', 'logo.png'].includes(c)) return 'logo';
@@ -76,6 +79,33 @@ function getRouteFromUrl(requestUrl) {
   } catch (e) {}
 
   return 'welcome';
+}
+
+async function respondWithSearch(query) {
+  const trimmed = String(query || '').trim();
+  let web = { results: [], providers: [] };
+
+  if (trimmed) {
+    try {
+      web = await searchWeb(trimmed, { limit: 15 });
+    } catch (e) {
+      console.error('Napture Search web lookup failed:', e);
+    }
+  }
+
+  const html = buildSearchPage({
+    query: trimmed,
+    webResults: web.results,
+    webProviders: web.providers
+  });
+
+  return new Response(html, {
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache'
+    }
+  });
 }
 
 function handleCustomProtocolRequest(request) {
@@ -201,6 +231,12 @@ function handleCustomProtocolRequest(request) {
           'Pragma': 'no-cache'
         }
       });
+    }
+
+    if (route === 'search') {
+      // Web lookups are async, so this route resolves to a Promise<Response>.
+      // Electron's protocol.handle accepts either a Response or a promise for one.
+      return respondWithSearch(url.searchParams.get('q') || '');
     }
 
     if (route === 'downloads') {
@@ -720,7 +756,8 @@ function buildWelcomePage() {
     duckduckgo: 'https://duckduckgo.com/',
     bing: 'https://www.bing.com/search',
     brave: 'https://search.brave.com/search',
-    ecosia: 'https://www.ecosia.org/search'
+    ecosia: 'https://www.ecosia.org/search',
+    napture: 'napture://search'
   };
   const searchBase = engineUrls[searchEngine] || engineUrls.duckduckgo;
 

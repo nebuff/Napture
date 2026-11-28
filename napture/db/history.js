@@ -56,6 +56,8 @@ function initDB() {
     -- during searchHistory() fetching. Significantly speeds up initial load of history panel.
     CREATE INDEX IF NOT EXISTS idx_history_last_visited ON history(last_visited_timestamp DESC);
   `);
+
+  initSearchIndex();
 }
 
 // Keep track of recent visits to avoid duplicate visit_count increments on title/favicon updates
@@ -117,6 +119,226 @@ function searchHistory(query, limit = 50) {
     `);
     return stmt.all(limit);
   }
+}
+
+// --- Local full-text index (history, bookmarks and open tabs) ---
+// FTS5 external-content tables are kept in sync with their source tables by
+// triggers, so every write path (visits, imports, sync, bulk deletes) updates
+// the index without extra bookkeeping. Everything stays in history.db.
+
+const FTS_TABLES = ['history_fts', 'bookmarks_fts', 'sessions_fts'];
+
+function initSearchIndex() {
+  if (!db) return;
+
+  let isNew = true;
+  try {
+    const rows = db.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('history_fts', 'bookmarks_fts', 'sessions_fts')"
+    ).all();
+    isNew = rows.length < FTS_TABLES.length;
+  } catch (e) {
+    isNew = true;
+  }
+
+  try {
+    db.exec(`
+      CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(
+        url, title, content='history', content_rowid='id', tokenize='porter unicode61'
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS bookmarks_fts USING fts5(
+        url, title, content='bookmarks', content_rowid='id', tokenize='porter unicode61'
+      );
+      CREATE VIRTUAL TABLE IF NOT EXISTS sessions_fts USING fts5(
+        url, title, content='sessions', content_rowid='id', tokenize='porter unicode61'
+      );
+
+      CREATE TRIGGER IF NOT EXISTS history_fts_insert AFTER INSERT ON history BEGIN
+        INSERT INTO history_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS history_fts_delete AFTER DELETE ON history BEGIN
+        INSERT INTO history_fts(history_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS history_fts_update AFTER UPDATE ON history BEGIN
+        INSERT INTO history_fts(history_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+        INSERT INTO history_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS bookmarks_fts_insert AFTER INSERT ON bookmarks BEGIN
+        INSERT INTO bookmarks_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS bookmarks_fts_delete AFTER DELETE ON bookmarks BEGIN
+        INSERT INTO bookmarks_fts(bookmarks_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS bookmarks_fts_update AFTER UPDATE ON bookmarks BEGIN
+        INSERT INTO bookmarks_fts(bookmarks_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+        INSERT INTO bookmarks_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS sessions_fts_insert AFTER INSERT ON sessions BEGIN
+        INSERT INTO sessions_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS sessions_fts_delete AFTER DELETE ON sessions BEGIN
+        INSERT INTO sessions_fts(sessions_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+      END;
+      CREATE TRIGGER IF NOT EXISTS sessions_fts_update AFTER UPDATE ON sessions BEGIN
+        INSERT INTO sessions_fts(sessions_fts, rowid, url, title) VALUES ('delete', old.id, old.url, old.title);
+        INSERT INTO sessions_fts(rowid, url, title) VALUES (new.id, new.url, new.title);
+      END;
+    `);
+
+    // Backfill once, for databases that predate the index.
+    if (isNew) {
+      db.exec("INSERT INTO history_fts(history_fts) VALUES('rebuild')");
+      db.exec("INSERT INTO bookmarks_fts(bookmarks_fts) VALUES('rebuild')");
+      db.exec("INSERT INTO sessions_fts(sessions_fts) VALUES('rebuild')");
+    }
+  } catch (e) {
+    console.error('Error initializing search index:', e);
+  }
+}
+
+// Turns free text into a safe FTS5 MATCH expression: every token becomes a
+// quoted prefix term, so user input can never be parsed as FTS5 operators.
+function sanitizeFtsQuery(query) {
+  const tokens = String(query || '').toLowerCase().match(/[\p{L}\p{N}]+/gu);
+  if (!tokens || tokens.length === 0) return '';
+  return tokens.map(token => '"' + token.replace(/"/g, '""') + '"*').join(' ');
+}
+
+const KIND_BOOST = { tab: 0.55, bookmark: 0.35, history: 0 };
+const KIND_ORDER = { tab: 0, bookmark: 1, history: 2 };
+
+function recencyBoost(timestamp) {
+  if (!timestamp) return 0;
+  const age = Date.now() - timestamp;
+  if (age < 0) return 0;
+  if (age < 86400000) return 0.3;
+  if (age < 604800000) return 0.15;
+  if (age < 2592000000) return 0.05;
+  return 0;
+}
+
+function searchIndex(query, limit = 25) {
+  if (!db) initDB();
+  const match = sanitizeFtsQuery(query);
+  if (!match) return [];
+
+  const maxPerSource = Math.max(limit, 10);
+  const collected = [];
+
+  try {
+    const rows = db.prepare(`
+      SELECT h.url, h.title, h.favicon_url, h.visit_count, h.last_visited_timestamp AS ts,
+             bm25(history_fts, 1.0, 5.0) AS bm,
+             snippet(history_fts, 1, char(1), char(2), '…', 12) AS snip
+      FROM history_fts
+      JOIN history h ON h.id = history_fts.rowid
+      WHERE history_fts MATCH ?
+      ORDER BY bm
+      LIMIT ?
+    `).all(match, maxPerSource);
+
+    for (const row of rows) {
+      collected.push({
+        kind: 'history',
+        url: row.url,
+        title: row.title || '',
+        favicon_url: row.favicon_url || null,
+        snippet: row.snip || '',
+        timestamp: row.ts || null,
+        score: -row.bm + KIND_BOOST.history + Math.min(row.visit_count || 0, 20) * 0.02 + recencyBoost(row.ts)
+      });
+    }
+  } catch (e) {
+    console.error('Search index history query failed:', e);
+  }
+
+  try {
+    const rows = db.prepare(`
+      SELECT b.url, b.title, b.date_added AS ts,
+             bm25(bookmarks_fts, 1.0, 5.0) AS bm,
+             snippet(bookmarks_fts, 1, char(1), char(2), '…', 12) AS snip
+      FROM bookmarks_fts
+      JOIN bookmarks b ON b.id = bookmarks_fts.rowid
+      WHERE bookmarks_fts MATCH ? AND b.is_folder = 0 AND b.url IS NOT NULL AND b.url != ''
+      ORDER BY bm
+      LIMIT ?
+    `).all(match, maxPerSource);
+
+    for (const row of rows) {
+      collected.push({
+        kind: 'bookmark',
+        url: row.url,
+        title: row.title || '',
+        favicon_url: null,
+        snippet: row.snip || '',
+        timestamp: row.ts || null,
+        score: -row.bm + KIND_BOOST.bookmark
+      });
+    }
+  } catch (e) {
+    console.error('Search index bookmark query failed:', e);
+  }
+
+  try {
+    const rows = db.prepare(`
+      SELECT s.url, s.title, s.isPinned, s.last_active AS ts,
+             bm25(sessions_fts, 1.0, 5.0) AS bm,
+             snippet(sessions_fts, 1, char(1), char(2), '…', 12) AS snip
+      FROM sessions_fts
+      JOIN sessions s ON s.id = sessions_fts.rowid
+      WHERE sessions_fts MATCH ?
+      ORDER BY bm
+      LIMIT ?
+    `).all(match, maxPerSource);
+
+    for (const row of rows) {
+      collected.push({
+        kind: 'tab',
+        url: row.url,
+        title: row.title || '',
+        favicon_url: null,
+        snippet: row.snip || '',
+        timestamp: row.ts || null,
+        score: -row.bm + KIND_BOOST.tab + (row.isPinned ? 0.1 : 0) + recencyBoost(row.ts)
+      });
+    }
+  } catch (e) {
+    console.error('Search index tab query failed:', e);
+  }
+
+  // One row per URL, keeping the strongest match and every source it matched.
+  const byUrl = new Map();
+  for (const item of collected) {
+    if (!item.url) continue;
+    const key = String(item.url).trim().toLowerCase().replace(/\/+$/, '');
+    const existing = byUrl.get(key);
+
+    if (!existing) {
+      byUrl.set(key, Object.assign({}, item, { kinds: [item.kind] }));
+      continue;
+    }
+
+    if (!existing.kinds.includes(item.kind)) {
+      existing.kinds.push(item.kind);
+      existing.kinds.sort((a, b) => KIND_ORDER[a] - KIND_ORDER[b]);
+    }
+    if (!existing.favicon_url && item.favicon_url) {
+      existing.favicon_url = item.favicon_url;
+    }
+    if (!existing.snippet && item.snippet) {
+      existing.snippet = item.snippet;
+    }
+    if (item.score > existing.score) {
+      const kinds = existing.kinds;
+      byUrl.set(key, Object.assign({}, item, { kinds }));
+    }
+  }
+
+  return Array.from(byUrl.values())
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit);
 }
 
 function closeDB() {
@@ -415,6 +637,8 @@ module.exports = {
   closeDB,
   addHistory,
   searchHistory,
+  searchIndex,
+  sanitizeFtsQuery,
   getSetting,
   setSetting,
   getAllSettings,

@@ -650,4 +650,56 @@ describe('History DB', () => {
       errorSpy.mockRestore();
     });
   });
+
+  describe('searchIndex (local full-text search)', () => {
+    it('finds history entries by title and by url', () => {
+      history.addHistory('https://www.sqlite.org/fts5.html', 'SQLite FTS5 Extension', '', 1000000);
+
+      const byTitle = history.searchIndex('fts5');
+      expect(byTitle.length).toBe(1);
+      expect(byTitle[0].url).toBe('https://www.sqlite.org/fts5.html');
+      expect(byTitle[0].kinds).toEqual(['history']);
+
+      expect(history.searchIndex('sqlite.org').length).toBe(1);
+    });
+
+    it('matches prefixes while typing', () => {
+      history.addHistory('https://example.com/electron', 'Electron Documentation', '');
+      expect(history.searchIndex('electr').length).toBe(1);
+    });
+
+    it('deduplicates by url and ranks open tabs above bookmarks and history', () => {
+      const url = 'https://developer.mozilla.org/en-US/docs/Web/CSS';
+      history.addHistory(url, 'CSS reference', '');
+      history.addBookmark('CSS reference', url);
+      history.saveSession([{ id: 1, url, title: 'CSS reference', isPinned: 0 }]);
+
+      const results = history.searchIndex('css');
+      expect(results.length).toBe(1);
+      expect(results[0].kind).toBe('tab');
+      expect(results[0].kinds).toEqual(['tab', 'bookmark', 'history']);
+    });
+
+    it('ignores bookmark folders and empty queries', () => {
+      history.addBookmark('Reading list', '', 0, 1);
+      expect(history.searchIndex('reading')).toEqual([]);
+      expect(history.searchIndex('   ')).toEqual([]);
+      expect(history.searchIndex('')).toEqual([]);
+    });
+
+    it('treats FTS5 operators as literal text instead of failing', () => {
+      history.addHistory('https://example.com/safe', 'Safe page', '');
+      expect(() => history.searchIndex('safe" OR "page')).not.toThrow();
+      expect(() => history.searchIndex('NEAR(')).not.toThrow();
+      expect(history.searchIndex('NEAR(')).toEqual([]);
+    });
+
+    it('drops deleted history from the index', () => {
+      history.addHistory('https://delete-me.example.com', 'Delete Me', '');
+      expect(history.searchIndex('delete').length).toBe(1);
+
+      history.clearAllHistory();
+      expect(history.searchIndex('delete')).toEqual([]);
+    });
+  });
 });
