@@ -11,11 +11,23 @@ if (typeof require !== 'undefined') {
   i18n = require('./i18n');
 }
 
+// The single global design system (napture/styles/design-system.css).
+let _designSystemCss = null;
+function getDesignSystemCss() {
+  if (_designSystemCss !== null) return _designSystemCss;
+  try {
+    _designSystemCss = require('./src/components/shared-ui').getSharedThemeCss();
+  } catch (e) {
+    _designSystemCss = '';
+  }
+  return _designSystemCss;
+}
+
 function buildHistoryPage() {
   const lang = (typeof getSetting === 'function' ? getSetting('language', 'en-US') : 'en-US') || 'en-US';
   const t = (k) => (i18n ? i18n.t(k, lang) : k);
   return `<!DOCTYPE html>
-<html lang="${lang}">
+<html lang="${lang}" data-nb-surface="page">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -25,24 +37,8 @@ function buildHistoryPage() {
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
-    :root {
-      --bg-app: transparent;
-      --bg-sidebar: transparent;
-      --bg-card: rgba(18, 19, 26, 0.6);
-      --bg-input: #12131a;
-      --bg-hover: #2a2b36;
-      --bg-active: #20212a;
-      --border-color: rgba(255, 255, 255, 0.08);
-      --border-focus: #7f8cff;
-      --text-primary: #ffffff;
-      --text-secondary: #a9b1d6;
-      --text-muted: #565f89;
-      --accent: #7f8cff;
-      --accent-hover: #6c7af7;
-      --danger: #e81123;
-      --danger-hover: #c40e1d;
-      --font-main: 'Inter', 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-    }
+    /* Tokens, reset and component library: napture/styles/design-system.css */
+    ${getDesignSystemCss()}
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     

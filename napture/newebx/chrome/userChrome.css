@@ -1,54 +1,8 @@
+@import "../../styles/design-system.css";
 @import "components/navigation.css";
 /* Napture Browser UI Styles - Chrome & Navigation */
 
 /* Dark Slate / Navy Aesthetic for Napture */
-:root {
-  /* Color Palette Specs (Themeable with CSS variables) */
-  --bg-darkest: rgba(18, 19, 26, 0.7);      /* Outer background / Window frame (Mica/Blur support) */
-  --bg-dark: rgba(18, 19, 26, 0.65); /* Left sidebar panel background */
-  --bg-active: rgba(32, 33, 42, 0.65); /* Active tab / Selected element */
-  --bg-hover: rgba(42, 43, 54, 0.65);  /* Hover element background */
-  --accent: #7f8cff;              /* Primary accent color */
-  --text-primary: #ffffff;        /* Primary text */
-  --text-secondary: #a9b1d6;      /* Secondary text / Icons */
-  --text-muted: #565f89;          /* Muted labels or borders */
-  --border-overlay: rgba(255, 255, 255, 0.08); /* Cutout border */
-
-  --sidebar-width: 240px;
-  --header-height: 48px;
-  --sidebar-panel-bg: rgba(23, 23, 32, 0.75);
-
-  /* Dynamic Popup Design Tokens (Dark Theme Defaults) */
-  --popup-bg: rgba(22, 23, 32, 0.82);
-  --popup-border: rgba(255, 255, 255, 0.12);
-  --popup-shadow: 0 16px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.05);
-  --popup-text-primary: #ffffff;
-  --popup-text-secondary: #a9b1d6;
-  --popup-text-muted: #565f89;
-  --popup-icon: #8f90a6;
-  --popup-hover: rgba(255, 255, 255, 0.08);
-  --popup-item-active: rgba(255, 255, 255, 0.12);
-  --popup-divider: rgba(255, 255, 255, 0.08);
-  --popup-input-bg: rgba(255, 255, 255, 0.06);
-  --popup-input-border: rgba(255, 255, 255, 0.1);
-}
-
-body.has-light-theme {
-  /* Dynamic Popup Overrides for Light Background Theme */
-  --popup-bg: rgba(255, 255, 255, 0.88);
-  --popup-border: rgba(0, 0, 0, 0.12);
-  --popup-shadow: 0 16px 40px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.06);
-  --popup-text-primary: var(--bg-input);
-  --popup-text-secondary: #374151;
-  --popup-text-muted: #6b7280;
-  --popup-icon: #4b5563;
-  --popup-hover: rgba(0, 0, 0, 0.06);
-  --popup-item-active: rgba(0, 0, 0, 0.1);
-  --popup-divider: rgba(0, 0, 0, 0.08);
-  --popup-input-bg: rgba(0, 0, 0, 0.05);
-  --popup-input-border: rgba(0, 0, 0, 0.12);
-}
-
 * {
   box-sizing: border-box;
   margin: 0;
@@ -1374,53 +1328,6 @@ body.dragging-tab .shortcuts-grid {
   text-overflow: ellipsis;
 }
 
-.quick-menu-panel.hidden {
-  display: none !important;
-}
-
-.quick-menu-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--popup-divider);
-}
-
-.quick-menu-header h3 {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--popup-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.quick-menu-close-btn {
-  background: transparent;
-  border: none;
-  color: var(--popup-text-secondary);
-  font-size: 16px;
-  cursor: pointer;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.quick-menu-close-btn:hover {
-  background-color: var(--popup-hover);
-  color: var(--popup-text-primary);
-}
-
-.quick-menu-list {
-  display: flex;
-  flex-direction: column;
-  padding: 8px;
-  gap: 2px;
-  overflow-y: auto;
-}
-
 /* Recent Downloads Panel */
 .downloads-panel {
   position: absolute;
@@ -1454,115 +1361,6 @@ body.dragging-tab .shortcuts-grid {
   background: linear-gradient(to bottom, transparent 0%, var(--sidebar-panel-bg, #171720) 100%);
   pointer-events: none;
   z-index: 10;
-}
-
-@keyframes panelSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes panelSlideDown {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(16px);
-  }
-}
-
-.downloads-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 10px 8px 10px;
-}
-
-.downloads-header h3 {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--popup-text-primary);
-  letter-spacing: -0.01em;
-}
-
-.downloads-close-btn {
-  background: transparent;
-  border: none;
-  color: var(--popup-text-secondary);
-  font-size: 16px;
-  cursor: pointer;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background-color 0.15s ease, color 0.15s ease;
-}
-
-.downloads-close-btn:hover {
-  background-color: var(--popup-hover);
-  color: var(--popup-text-primary);
-}
-
-.downloads-list {
-  display: flex;
-  flex-direction: column;
-  padding: 4px 10px 8px 10px;
-  gap: 2px;
-  overflow-y: auto;
-  max-height: 340px;
-}
-
-.download-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 8px;
-  background-color: transparent;
-  transition: background-color 0.15s ease;
-  cursor: pointer;
-}
-
-.download-item:hover {
-  background-color: var(--popup-hover);
-}
-
-.download-file-icon {
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  background-color: var(--popup-input-bg);
-  border: 1px solid var(--popup-input-border);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.download-file-info {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex-grow: 1;
-  min-width: 0;
-}
-
-.download-file-name {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--popup-text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .download-file-meta {
