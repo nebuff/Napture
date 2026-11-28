@@ -73,14 +73,31 @@ describe('Napture Zero-Knowledge Sync Engine (E2EE)', () => {
     const wrongKey = crypto.randomBytes(32).toString('hex');
     const encrypted = encryptPayload({ secret: 'data' }, testKey);
 
-    // Wrong key returns null (no crash)
-    const resultWithWrongKey = decryptPayload(encrypted, wrongKey);
-    expect(resultWithWrongKey).toBeNull();
+    // Both failure modes are logged on purpose; capture those expected stack
+    // traces instead of printing them, and assert they are actually reported.
+    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
 
-    // Tampered ciphertext returns null
-    const tampered = { ...encrypted, ciphertext: 'AAAA' + encrypted.ciphertext.slice(4) };
-    const resultWithTampered = decryptPayload(tampered, testKey);
-    expect(resultWithTampered).toBeNull();
+    try {
+      // Wrong key returns null (no crash)
+      const resultWithWrongKey = decryptPayload(encrypted, wrongKey);
+      expect(resultWithWrongKey).toBeNull();
+
+      // Tampered ciphertext returns null
+      const tampered = { ...encrypted, ciphertext: 'AAAA' + encrypted.ciphertext.slice(4) };
+      const resultWithTampered = decryptPayload(tampered, testKey);
+      expect(resultWithTampered).toBeNull();
+
+      expect(errorSpy).toHaveBeenCalledTimes(2);
+      for (const call of errorSpy.mock.calls) {
+        expect(call[0]).toBe('Decryption error (possibly wrong key or corrupted payload):');
+        // Native crypto errors come from outside Jest's VM context, so avoid
+        // expect.any(Error) here and just require the underlying error argument.
+        expect(call).toHaveLength(2);
+        expect(call[1]).toBeTruthy();
+      }
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 
   test('sanitizes bookmarks tree by stripping runtime/transient fields', () => {
@@ -166,6 +183,10 @@ describe('Napture Zero-Knowledge Sync Engine (E2EE)', () => {
     historyDb.clearAllBookmarks = jest.fn();
     historyDb.addBookmarksBatch = jest.fn();
 
+    // The engine announces rejected stale deltas; keep that expected log out of
+    // the test output while still asserting it happens.
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
     try {
       // 1. Stale remote delta (timestamp = 800 < local 1000) -> Must be rejected (returns false)
       const stalePayload = encryptPayload([{ id: 'b-old', type: 'link', title: 'Old', url: 'https://old.com' }], testKey);
@@ -193,6 +214,7 @@ describe('Napture Zero-Knowledge Sync Engine (E2EE)', () => {
       const stalePinnedPayload = encryptPayload([{ title: 'Old Pin', url: 'https://oldpin.com' }], testKey);
       const stalePinnedResult = applyRemoteDelta({ dataType: 'pinned_tabs', payload: stalePinnedPayload, timestamp: 900 }, testKey);
       expect(stalePinnedResult).toBe(false);
+      expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring stale remote pinned sites delta'));
 
       const newerPinnedPayload = encryptPayload([{ title: 'New Pin', url: 'https://newpin.com' }], testKey);
       const newerPinnedResult = applyRemoteDelta({ dataType: 'pinned_tabs', payload: newerPinnedPayload, timestamp: 1500 }, testKey);
@@ -214,6 +236,7 @@ describe('Napture Zero-Knowledge Sync Engine (E2EE)', () => {
       historyDb.setSetting = origSetSetting;
       historyDb.clearAllBookmarks = origClearAllBookmarks;
       historyDb.addBookmarksBatch = origAddBookmarksBatch;
+      logSpy.mockRestore();
     }
   });
 });

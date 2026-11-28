@@ -97,17 +97,24 @@ function addHistory(url, title, faviconUrl, forcedTimestamp = null) {
   }
 }
 
+// SQLite LIKE treats % and _ as wildcards, so a literal search for "100%" or
+// "my_site" would otherwise match far more rows than the user asked for ("_"
+// alone matches every non-empty URL). Escape the pattern before wrapping it.
+function escapeLikePattern(value) {
+  return String(value).replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 function searchHistory(query, limit = 50) {
   if (!db) initDB();
 
   if (query) {
     const stmt = db.prepare(`
       SELECT * FROM history
-      WHERE url LIKE ? OR title LIKE ?
+      WHERE url LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
       ORDER BY last_visited_timestamp DESC
       LIMIT ?
     `);
-    const likeQuery = `%${query}%`;
+    const likeQuery = `%${escapeLikePattern(query)}%`;
     return stmt.all(likeQuery, likeQuery, limit);
   } else {
     const stmt = db.prepare(`

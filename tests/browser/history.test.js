@@ -250,6 +250,34 @@ describe('History DB', () => {
       expect(results[1].title).toBe('Banana');
       expect(results[2].title).toBe('Apple');
     });
+
+    it('should treat % in the query as a literal character, not a wildcard', () => {
+      history.addHistory('https://example2024.com', 'Year', '', 1033000);
+      history.addHistory('https://encoded.example/a%20b', 'Encoded space', '', 1034000);
+
+      const results = history.searchHistory('%20', 10);
+      expect(results.map(r => r.url)).toEqual(['https://encoded.example/a%20b']);
+    });
+
+    it('should treat _ in the query as a literal character, not a wildcard', () => {
+      history.addHistory('https://under_score.example', 'Underscore', '', 1044000);
+
+      const results = history.searchHistory('_', 10);
+      expect(results.map(r => r.url)).toEqual(['https://under_score.example']);
+    });
+
+    it('should not return the whole history for a wildcard-only query', () => {
+      expect(history.searchHistory('%', 10)).toEqual([]);
+      expect(history.searchHistory('_', 10)).toEqual([]);
+    });
+
+    it('should match a literal backslash in the query', () => {
+      history.addHistory('https://back\\slash.example', 'Backslash', '', 1055000);
+
+      const results = history.searchHistory('back\\slash', 10);
+      expect(results.map(r => r.url)).toEqual(['https://back\\slash.example']);
+      expect(history.searchHistory('\\', 10)).toHaveLength(1);
+    });
   });
 
   describe('deleteHistoryItems', () => {

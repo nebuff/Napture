@@ -1303,12 +1303,30 @@ if (typeof document !== 'undefined') {
   });
 }
 
+function copyLinkToClipboard(url) {
+  if (!url) return;
+  if (typeof navigator === 'undefined' || !navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+    return;
+  }
+
+  try {
+    const result = navigator.clipboard.writeText(url);
+    if (result && typeof result.catch === 'function') {
+      // Clipboard writes can reject (permissions/insecure context). Copying is
+      // best-effort, so consume the failure instead of leaving it unhandled.
+      result.catch(() => {});
+    }
+  } catch (e) {
+    // Clipboard access can also throw synchronously; ignore the failed copy.
+  }
+}
+
 function handleContextAction(action, payload) {
   const target = (payload && payload.target) || activeContextMenuTarget;
   if (!target) return;
   
   if (action === 'copy-link') {
-    if (target.data && target.data.url) navigator.clipboard.writeText(target.data.url);
+    if (target.data && target.data.url) copyLinkToClipboard(target.data.url);
   } else if (action === 'rename-tab' || action === 'rename-folder') {
     if (target.type && target.type.startsWith('bookmark')) {
       const found = findBookmark(customBookmarks, target.id);
@@ -1360,7 +1378,8 @@ function handleContextAction(action, payload) {
       }
     } else {
       if (target.data && typeof createTab === 'function') {
-        createTab(target.data.url || 'napture://welcome', false);
+        // forceNew: duplicating must not fall through to the switch-to-existing path.
+        createTab(target.data.url || 'napture://welcome', false, null, true);
       }
     }
   } else if (action === 'close-tab') {
