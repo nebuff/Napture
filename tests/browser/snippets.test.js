@@ -1,5 +1,7 @@
 jest.mock('better-sqlite3', () => function() {
-  return { exec: jest.fn(), prepare: () => ({ get: jest.fn(), all: jest.fn(), run: jest.fn() }) };
+  // A fresh database returns an empty result set, not undefined; iterating
+  // undefined made getAllSettings() throw and log during page builds.
+  return { exec: jest.fn(), prepare: () => ({ get: jest.fn(), all: jest.fn(() => []), run: jest.fn() }) };
 }, { virtual: true });
 
 jest.mock('electron', () => ({

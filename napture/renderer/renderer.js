@@ -1361,9 +1361,9 @@ function getInitialTabTitle(url) {
 // ----------------------------------------------------
 // switchTo: if false, the tab is created in the background without switching focus.
 // Returns the new tabId.
-function createTab(url = 'napture://welcome', switchTo = true, customTabId = null) {
+function createTab(url = 'napture://welcome', switchTo = true, customTabId = null, forceNew = false) {
   // If switch to existing tab/bookmark is enabled, check if the non-welcome URL is already open or bookmarked
-  if (!customTabId && url && !isWelcomeUrl(url) && (!currentSettings || currentSettings.switchToExistingTab !== false)) {
+  if (!customTabId && !forceNew && url && !isWelcomeUrl(url) && (!currentSettings || currentSettings.switchToExistingTab !== false)) {
     const cleanTarget = String(url).trim().toLowerCase().replace(/\/+$/, '');
     if (cleanTarget) {
       // 1. Check open tabs
@@ -1938,9 +1938,9 @@ function handleAddressSubmit() {
   const protocolPattern = /^[a-zA-Z0-9+-.]+:\/\//;
   const naptureShortPattern = /^(about|settings|keyboard|shortcuts|welcome|start|newtab|history)$/i;
   const nePattern = /^([a-zA-Z0-9-]+\.)+ne(\/.*)?$/i;
-  const domainPattern = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(\/.*)?$/i;
-  const localhostPattern = /^localhost(:\d+)?(\/.*)?$/i;
-  const ipPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(:\d+)?(\/.*)?$/;
+  const domainPattern = /^([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}(?::\d+)?(?:[/?#].*)?$/i;
+  const localhostPattern = /^localhost(?::\d+)?(?:[/?#].*)?$/i;
+  const ipPattern = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}(?::\d+)?(?:[/?#].*)?$/;
 
   if (protocolPattern.test(url)) {
     // Valid standard protocol
@@ -3324,6 +3324,12 @@ if (headerBarEl) {
 loadPinnedSites();
 
 (async () => {
+  // Yield once before startup so every later `let` declaration in this file is
+  // initialized. The preload bridge's getSettings() await normally provides
+  // this; the plain-browser fallback has no bridge, so restore/createTab would
+  // otherwise run while isToolbarCustomizing is still in the temporal dead zone.
+  await Promise.resolve();
+
   if (window.naptureAPI && window.naptureAPI.getSettings) {
     const s = await window.naptureAPI.getSettings();
     if (s) {
@@ -6275,4 +6281,24 @@ loadSidebarBottomState();
 renderToolbarCustomizable();
 renderSidebarBottom();
 loadExtensionDescriptors();
+
+// Expose the address-bar/security helpers when the controller is loaded as a
+// module (jsdom tests, static tooling). Browsers have no `module`, so this is
+// skipped in the real renderer.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    formatUrlDisplay,
+    updateAddressBarDisplay,
+    updateSecurityIcon,
+    isInternalUrl,
+    handleAddressSubmit,
+    createTab,
+    switchTab,
+    closeTab,
+    updateNavButtons,
+    closedTabsHistory,
+    startToolbarCustomizing,
+    stopToolbarCustomizing
+  };
+}
 
