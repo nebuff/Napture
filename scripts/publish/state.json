@@ -1,5 +1,5 @@
 {
-  "version": "0.22.4",
-  "channel": "stable",
-  "tag": "v0.22.4"
+  "version": "0.22.5-beta",
+  "channel": "beta",
+  "tag": "v0.22.5-beta"
 }
