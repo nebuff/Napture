@@ -5,7 +5,12 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('naptureAPI', {
   // Renderer to Main Process calls
-  createTab: (tabId, url) => ipcRenderer.send('create-tab', { tabId, url }),
+  createTab: (tabId, url, options) => ipcRenderer.send('create-tab', {
+    tabId,
+    url,
+    defer: !!(options && options.defer),
+    title: options && options.title
+  }),
   switchTab: (payload) => ipcRenderer.send('switch-tab', payload),
   toggleMuteTab: (tabId) => ipcRenderer.send('toggle-mute-tab', tabId),
   closeTab: (tabId) => ipcRenderer.send('close-tab', tabId),
@@ -80,6 +85,11 @@ contextBridge.exposeInMainWorld('naptureAPI', {
     const subscription = (event, data) => callback(data);
     ipcRenderer.on('tab-title-updated', subscription);
     return () => ipcRenderer.removeListener('tab-title-updated', subscription);
+  },
+  onTabSlept: (callback) => {
+    const subscription = (event, data) => callback(data);
+    ipcRenderer.on('tab-slept', subscription);
+    return () => ipcRenderer.removeListener('tab-slept', subscription);
   },
   onTabFaviconUpdated: (callback) => {
     const subscription = (event, data) => callback(data);

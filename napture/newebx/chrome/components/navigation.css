@@ -175,6 +175,26 @@ body.dragging-pinned-site #tabs-container {
   object-fit: contain;
 }
 
+/* Sleeping tabs stay visible but recede until clicked awake. */
+.tab.is-sleeping .tab-title {
+  color: var(--text-secondary);
+  opacity: 0.7;
+}
+
+.tab.is-sleeping:hover .tab-title {
+  opacity: 1;
+}
+
+.tab.is-sleeping .tab-favicon {
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.tab-sleep-icon {
+  width: 14px;
+  height: 14px;
+}
+
 /* Tab Title */
 .tab-title {
   font-size: 13px;

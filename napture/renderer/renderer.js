@@ -18,6 +18,7 @@ if (typeof window !== 'undefined' && !window.naptureAPI) {
     onTabLoadingState: () => () => {},
     onTabNavigated: () => () => {},
     onTabTitleUpdated: () => () => {},
+    onTabSlept: () => () => {},
     onTabFaviconUpdated: () => () => {},
     onOpenUrlInNewTab: () => () => {},
     onTriggerResize: () => () => {},
@@ -1361,7 +1362,7 @@ function getInitialTabTitle(url) {
 // ----------------------------------------------------
 // switchTo: if false, the tab is created in the background without switching focus.
 // Returns the new tabId.
-function createTab(url = 'napture://welcome', switchTo = true, customTabId = null, forceNew = false) {
+function createTab(url = 'napture://welcome', switchTo = true, customTabId = null, forceNew = false, deferLoad = false) {
   // If switch to existing tab/bookmark is enabled, check if the non-welcome URL is already open or bookmarked
   if (!customTabId && !forceNew && url && !isWelcomeUrl(url) && (!currentSettings || currentSettings.switchToExistingTab !== false)) {
     const cleanTarget = String(url).trim().toLowerCase().replace(/\/+$/, '');
@@ -1410,7 +1411,8 @@ function createTab(url = 'napture://welcome', switchTo = true, customTabId = nul
     id: tabId,
     title: getInitialTabTitle(url),
     url: url,
-    isLoading: !isWelcome,
+    isLoading: !isWelcome && !deferLoad,
+    isSleeping: deferLoad,
     favicon: null,
     canGoBack: false,
     canGoForward: false,
@@ -1419,11 +1421,17 @@ function createTab(url = 'napture://welcome', switchTo = true, customTabId = nul
   };
 
   tabs.push(newTab);
-  window.naptureAPI.createTab(tabId, url);
+  if (deferLoad) {
+    window.naptureAPI.createTab(tabId, url, { defer: true, title: newTab.title });
+  } else {
+    window.naptureAPI.createTab(tabId, url);
+  }
 
   if (switchTo) {
     switchTab(tabId);
-  } else {
+  } else if (!deferLoad) {
+    // Deferred restore is batched: rendering every restored tab one at a time
+    // is wasted layout work before the first switch paints the strip.
     renderTabs();
     if (typeof window.updateActiveBookmark === 'function') {
       window.updateActiveBookmark();
@@ -1527,9 +1535,16 @@ function switchTab(tabId) {
   if (isToolbarCustomizing) return;
   activeTabId = tabId;
   _lastSentBounds = null;
-  renderTabs();
-  
+
   const activeTab = tabs.find(t => t.id === activeTabId);
+  if (activeTab) {
+    // Activation hydrates a slept tab in the main process; clear the indicator
+    // immediately so the click feels responsive.
+    activeTab.isSleeping = false;
+    updateTabSleepState(activeTab);
+  }
+  if (!updateActiveTabHighlight()) renderTabs();
+
   if (activeTab) {
     updateAddressBarDisplay(activeTab.url, activeTab.title);
     if (document.activeElement !== addressInput) {
@@ -1640,6 +1655,81 @@ function closeTab(tabId, event) {
   }
 }
 
+// Switching tabs does not change the strip's contents, only which tab is
+// active. Update just that class instead of rebuilding every tab element and
+// reattaching all drag/drop listeners on every switch. Fall back to a full
+// render when the DOM and model disagree (creation, close, pinned changes).
+function updateActiveTabHighlight() {
+  if (!tabsContainer) return false;
+  const pinnedTabIds = new Set(pinnedSites.map(p => p.tabId));
+  const bookmarkTabIds = window.getBookmarkTabIds ? new Set(window.getBookmarkTabIds()) : new Set();
+  const regularTabs = tabs.filter(tab => !pinnedTabIds.has(tab.id) && !bookmarkTabIds.has(tab.id) && !isWelcomeUrl(tab.url));
+  const tabEls = tabsContainer.querySelectorAll('.tab');
+  if (tabEls.length !== regularTabs.length) return false;
+
+  let activeSeen = false;
+  let activeEl = null;
+  tabEls.forEach(el => {
+    const isActive = el.dataset.tabId === activeTabId;
+    el.classList.toggle('active', isActive);
+    el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    if (isActive) {
+      activeSeen = true;
+      activeEl = el;
+    }
+  });
+
+  if (!activeSeen) return false;
+  if (activeEl && typeof activeEl.scrollIntoView === 'function') {
+    try { activeEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+  return true;
+}
+
+function getTabAriaLabel(tab) {
+  const label = (tab && tab.title) || 'Tab';
+  return tab && tab.isSleeping ? `${label} (sleeping)` : label;
+}
+
+const SLEEP_TAB_ICON = '<svg class="tab-sleep-icon" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>';
+
+function renderTabIcon(tab, iconEl) {
+  if (!iconEl) return;
+
+  if (tab.isSleeping) {
+    iconEl.innerHTML = SLEEP_TAB_ICON;
+    return;
+  }
+
+  if (tab.isLoading) {
+    iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
+  } else if (tab.favicon) {
+    const img = document.createElement('img');
+    img.src = tab.favicon;
+    img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
+    iconEl.innerHTML = '';
+    iconEl.appendChild(img);
+  } else {
+    iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
+  }
+}
+
+function updateTabSleepState(tab) {
+  if (!tabsContainer || !tab) return false;
+  const tabEl = tabsContainer.querySelector(`.tab[data-tab-id="${tab.id}"]`);
+  if (!tabEl) return false;
+
+  tabEl.classList.toggle('is-sleeping', !!tab.isSleeping);
+  tabEl.title = tab.isSleeping ? 'Sleeping tab (click to wake)' : '';
+  tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
+
+  const titleEl = tabEl.querySelector('.tab-title');
+  if (titleEl && tab.title) titleEl.textContent = tab.title;
+
+  renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
+  return true;
+}
+
 function renderTabs() {
   tabsContainer.innerHTML = '';
 
@@ -1665,10 +1755,12 @@ function renderTabs() {
     regularTabs.forEach(tab => {
       const tabEl = document.createElement('div');
       tabEl.className = `tab ${tab.id === activeTabId ? 'active' : ''}`;
+      if (tab.isSleeping) tabEl.classList.add('is-sleeping');
       tabEl.dataset.tabId = tab.id;
       tabEl.draggable = true;
       tabEl.setAttribute('role', 'tab');
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
+      if (tab.isSleeping) tabEl.title = 'Sleeping tab (click to wake)';
 
       // Draggable event listeners
       tabEl.addEventListener('dragstart', (e) => {
@@ -1804,22 +1896,10 @@ function renderTabs() {
         }
       });
 
-      // Favicon or Spinner
+      // Favicon, loading spinner, or sleep indicator
       const iconEl = document.createElement('div');
       iconEl.className = 'tab-favicon';
-      
-      if (tab.isLoading) {
-        iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
-      } else if (tab.favicon) {
-        const img = document.createElement('img');
-        img.src = tab.favicon;
-        img.onerror = () => {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        };
-        iconEl.appendChild(img);
-      } else {
-        iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-      }
+      renderTabIcon(tab, iconEl);
 
       const titleEl = document.createElement('div');
       titleEl.className = 'tab-title';
@@ -2429,18 +2509,7 @@ window.naptureAPI.onTabLoadingState(({ tabId, isLoading }) => {
         tabLoadingWatchdogs.delete(tabId);
         const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
         if (tabEl) {
-          const iconEl = tabEl.querySelector('.tab-favicon');
-          if (iconEl) {
-            if (tab.favicon) {
-              const img = document.createElement('img');
-              img.src = tab.favicon;
-              img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-              iconEl.innerHTML = '';
-              iconEl.appendChild(img);
-            } else {
-              iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-            }
-          }
+          renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
         }
         if (tabId === activeTabId) {
           updatePageLoadingState(false);
@@ -2451,20 +2520,7 @@ window.naptureAPI.onTabLoadingState(({ tabId, isLoading }) => {
     // Bolt: Surgical DOM update to avoid full re-render
     const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
     if (tabEl) {
-      const iconEl = tabEl.querySelector('.tab-favicon');
-      if (iconEl) {
-        if (isLoading) {
-          iconEl.innerHTML = '<div class="loading-spinner" style="width: 12px; height: 12px; border-width: 1.5px;"></div>';
-        } else if (tab.favicon) {
-          const img = document.createElement('img');
-          img.src = tab.favicon;
-          img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-          iconEl.innerHTML = '';
-          iconEl.appendChild(img);
-        } else {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        }
-      }
+      renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
     } else {
       renderTabs();
     }
@@ -2505,7 +2561,7 @@ window.naptureAPI.onTabNavigated(({ tabId, url, title, canGoBack, canGoForward }
     if (tabEl && !isWelcomeUrl(tab.url)) {
       const titleEl = tabEl.querySelector('.tab-title');
       if (titleEl && tab.title) titleEl.textContent = tab.title;
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
     } else {
       renderTabs();
     }
@@ -2538,7 +2594,7 @@ window.naptureAPI.onTabTitleUpdated(({ tabId, title }) => {
     if (tabEl) {
       const titleEl = tabEl.querySelector('.tab-title');
       if (titleEl && tab.title) titleEl.textContent = tab.title;
-      tabEl.setAttribute('aria-label', tab.title || 'Tab');
+      tabEl.setAttribute('aria-label', getTabAriaLabel(tab));
     } else {
       renderTabs();
     }
@@ -2551,6 +2607,22 @@ window.naptureAPI.onTabTitleUpdated(({ tabId, title }) => {
   }
 });
 
+window.naptureAPI.onTabSlept(({ tabId, url, title }) => {
+  const tab = tabs.find(t => t.id === tabId);
+  // A race can deliver the notification after the user has already activated
+  // the tab; never show a sleeping indicator on the active tab.
+  if (!tab || tabId === activeTabId) return;
+
+  tab.isSleeping = true;
+  if (url && url !== 'about:blank') tab.url = url;
+  if (title) tab.title = title;
+
+  if (!updateTabSleepState(tab)) {
+    renderTabs();
+  }
+  scheduleSessionSave();
+});
+
 window.naptureAPI.onTabFaviconUpdated(({ tabId, favicon }) => {
   const tab = tabs.find(t => t.id === tabId);
   if (tab) {
@@ -2559,18 +2631,7 @@ window.naptureAPI.onTabFaviconUpdated(({ tabId, favicon }) => {
     // Bolt: Surgical DOM update to avoid full re-render
     const tabEl = tabsContainer ? tabsContainer.querySelector(`.tab[data-tab-id="${tabId}"]`) : null;
     if (tabEl) {
-      const iconEl = tabEl.querySelector('.tab-favicon');
-      if (iconEl && !tab.isLoading) {
-        if (favicon) {
-          const img = document.createElement('img');
-          img.src = favicon;
-          img.onerror = () => { iconEl.innerHTML = getDefaultFaviconIcon(tab.url); };
-          iconEl.innerHTML = '';
-          iconEl.appendChild(img);
-        } else {
-          iconEl.innerHTML = getDefaultFaviconIcon(tab.url);
-        }
-      }
+      renderTabIcon(tab, tabEl.querySelector('.tab-favicon'));
     } else {
       renderTabs();
     }
@@ -3380,7 +3441,13 @@ loadPinnedSites();
         if (!cleanUrl || isWelcomeUrl(cleanUrl)) continue;
         if (pinnedUrls.has(cleanUrl) || bookmarkUrls.has(cleanUrl)) continue; // Don't restore tabs already present in pinned/bookmarks area
 
-        const createdId = createTab(t.url, false);
+        // Restore background tabs lazily: the main process registers them but
+        // only the first tab gets a live renderer process. The rest hydrate on
+        // first activation, keeping startup memory flat regardless of tab count.
+        // Reusing the stored id also lets a slept tab find its scroll/history
+        // archive after a restart.
+        const restoredId = t.id != null ? String(t.id) : null;
+        const createdId = createTab(t.url, false, restoredId, false, true);
         if (!firstRestoredTabId) firstRestoredTabId = createdId;
         restoredTabs++;
       }

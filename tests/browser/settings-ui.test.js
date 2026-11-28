@@ -226,7 +226,8 @@ describe('Toolbar Layout Validation and Invariants', () => {
     ]);
     const defaults = getDefaultSettings();
     expect(defaults.dynamicBackground).toBe(true);
-    expect(defaults.memorySaver).toBe(false);
+    expect(defaults.memorySaver).toBe(true);
+    expect(defaults.memoryTarget).toBe(1500);
   });
 
   it('re-inserts address-container if missing from custom layout', () => {
@@ -339,39 +340,50 @@ describe('Settings UI Client Script Validation', () => {
 });
 
 describe('Memory Saver Migration Logic', () => {
-  it('disables memory saver and sets migration flag on unmigrated profiles', () => {
+  it('re-enables the rebuilt saver for profiles left on the old 0.20 defaults', () => {
     const store = new Map();
     const getSetting = (k, def) => store.has(k) ? store.get(k) : def;
     const setSetting = (k, v) => store.set(k, v);
 
-    // Simulate startup migration check
-    if (!getSetting('memorySaver_v20_migrated', false)) {
-      setSetting('memorySaver', false);
-      setSetting('memorySaver_v20_migrated', true);
+    // 0.20 force-disabled the old implementation and left the old target.
+    setSetting('memorySaver_v20_migrated', true);
+    setSetting('memorySaver', false);
+    // The range input persists its value as a string.
+    setSetting('memoryTarget', '700');
+
+    // Simulate the current startup migration check
+    if (!getSetting('memorySaver_v22_migrated', false)) {
+      if (getSetting('memorySaver_v20_migrated', false) && Number(getSetting('memoryTarget', 1500)) === 700) {
+        setSetting('memorySaver', true);
+        setSetting('memoryTarget', 1500);
+      }
+      setSetting('memorySaver_v22_migrated', true);
     }
 
-    expect(getSetting('memorySaver', true)).toBe(false);
-    expect(getSetting('memorySaver_v20_migrated', false)).toBe(true);
+    expect(getSetting('memorySaver', false)).toBe(true);
+    expect(getSetting('memoryTarget', 0)).toBe(1500);
+    expect(getSetting('memorySaver_v22_migrated', false)).toBe(true);
   });
 
-  it('preserves user preference on subsequent updates when migration flag is set', () => {
+  it('preserves a user-tuned memory target when migrating', () => {
     const store = new Map();
     const getSetting = (k, def) => store.has(k) ? store.get(k) : def;
     const setSetting = (k, v) => store.set(k, v);
 
-    // Migration ran previously
     setSetting('memorySaver_v20_migrated', true);
-    // User re-enabled memory saver in 0.20.1
-    setSetting('memorySaver', true);
+    setSetting('memorySaver', false);
+    setSetting('memoryTarget', 3000);
 
-    // Update to 0.20.2 occurs
-    if (!getSetting('memorySaver_v20_migrated', false)) {
-      setSetting('memorySaver', false);
-      setSetting('memorySaver_v20_migrated', true);
+    if (!getSetting('memorySaver_v22_migrated', false)) {
+      if (getSetting('memorySaver_v20_migrated', false) && getSetting('memoryTarget', 1500) === 700) {
+        setSetting('memorySaver', true);
+        setSetting('memoryTarget', 1500);
+      }
+      setSetting('memorySaver_v22_migrated', true);
     }
 
-    // Memory saver remains enabled
-    expect(getSetting('memorySaver', false)).toBe(true);
+    expect(getSetting('memorySaver', false)).toBe(false);
+    expect(getSetting('memoryTarget', 0)).toBe(3000);
   });
 });
 

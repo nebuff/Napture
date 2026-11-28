@@ -1,7 +1,7 @@
 /**
  * @jest-environment jsdom
  */
-const { loadRendererFixture, setRendererSetting } = require('./helpers/renderer-fixture');
+const { loadRendererFixture, setRendererSetting, sendTabSlept } = require('./helpers/renderer-fixture');
 
 let renderer;
 let tabsContainer;
@@ -198,6 +198,55 @@ describe('Renderer tab management', () => {
       expect(headerBar.classList.contains('is-welcome-tab')).toBe(false);
       expect(document.body.classList.contains('is-welcome-tab')).toBe(false);
       expect(securityBadge.title).toBe('Connection is secure (HTTPS)');
+    });
+  });
+
+  describe('sleep indicators', () => {
+    it('shows a sleep indicator for deferred restored tabs until they are activated', () => {
+      const firstId = renderer.createTab('https://awake.example', true);
+      const sleepingId = renderer.createTab('https://sleep.example', false, 'tab-sleep-restored', false, true);
+
+      // Deferred tabs skip the render at creation; the next switch reconciles
+      // the strip and paints every restored tab.
+      renderer.switchTab(firstId);
+
+      const tabEl = tabsContainer.querySelector(`.tab[data-tab-id="${sleepingId}"]`);
+      expect(tabEl).not.toBeNull();
+      expect(tabEl.classList.contains('is-sleeping')).toBe(true);
+      expect(tabEl.querySelector('.tab-sleep-icon')).not.toBeNull();
+      expect(tabEl.title).toBe('Sleeping tab (click to wake)');
+      expect(tabEl.getAttribute('aria-label')).toContain('(sleeping)');
+
+      renderer.switchTab(sleepingId);
+
+      expect(tabEl.classList.contains('is-sleeping')).toBe(false);
+      expect(tabEl.querySelector('.tab-sleep-icon')).toBeNull();
+      expect(tabEl.title).toBe('');
+      expect(tabEl.getAttribute('aria-label')).not.toContain('(sleeping)');
+    });
+
+    it('marks a running background tab asleep from main-process IPC and clears it on activation', () => {
+      const activeId = renderer.createTab('https://active.example', true);
+      const sleepingId = renderer.createTab('https://background.example', false);
+
+      renderer.switchTab(activeId);
+      const tabEl = tabsContainer.querySelector(`.tab[data-tab-id="${sleepingId}"]`);
+      expect(tabEl.classList.contains('is-sleeping')).toBe(false);
+
+      sendTabSlept({ tabId: sleepingId, url: 'https://background.example', title: 'Background Page' });
+
+      expect(window.tabs.find((tab) => tab.id === sleepingId).isSleeping).toBe(true);
+      expect(tabEl.classList.contains('is-sleeping')).toBe(true);
+      expect(tabEl.querySelector('.tab-sleep-icon')).not.toBeNull();
+      expect(tabEl.querySelector('.tab-title').textContent).toBe('Background Page');
+
+      renderer.switchTab(sleepingId);
+      expect(tabEl.classList.contains('is-sleeping')).toBe(false);
+      expect(tabEl.querySelector('.tab-sleep-icon')).toBeNull();
+
+      // A late notification for the now-active tab must not re-mark it.
+      sendTabSlept({ tabId: sleepingId, url: 'https://background.example', title: 'Background Page' });
+      expect(tabEl.classList.contains('is-sleeping')).toBe(false);
     });
   });
 
