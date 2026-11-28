@@ -7195,6 +7195,52 @@ function fetchGitHubReleases() {
   });
 }
 
+// How this copy was installed decides which artifact can actually replace it:
+// an AppImage dropped next to an rpm/deb install updates nothing. Cached once
+// per run; null means "not packaged / unknown", which keeps the old ordering.
+let cachedInstallKind;
+function detectInstallKind() {
+  if (cachedInstallKind !== undefined) return cachedInstallKind;
+  cachedInstallKind = computeInstallKind();
+  return cachedInstallKind;
+}
+
+function computeInstallKind() {
+  if (!app.isPackaged) return null;
+
+  if (process.platform === 'win32') {
+    // electron-builder's portable target runs from a temp copy and exposes the
+    // real .exe in these vars, so the portable build can be replaced in place.
+    return (process.env.PORTABLE_EXECUTABLE_FILE || process.env.PORTABLE_EXECUTABLE_DIR)
+      ? 'portable'
+      : 'nsis';
+  }
+  if (process.platform === 'darwin') return 'mac';
+  if (process.platform !== 'linux') return null;
+
+  if (process.env.APPIMAGE) return 'appimage';
+  // Sandboxed builds are updated by their store; never hand them a package.
+  if (process.env.SNAP || process.env.FLATPAK_ID || fs.existsSync('/.flatpak-info')) return 'sandbox';
+
+  // rpm and deb packages are owned by the system package manager.
+  const execPath = process.execPath;
+  const owners = [
+    { kind: 'rpm', cmd: 'rpm', args: ['-qf', execPath] },
+    { kind: 'deb', cmd: 'dpkg-query', args: ['-S', execPath] }
+  ];
+  const { execFileSync } = require('child_process');
+  for (const owner of owners) {
+    try {
+      execFileSync(owner.cmd, owner.args, { stdio: 'ignore', timeout: 3000 });
+      return owner.kind;
+    } catch (e) {
+      // ENOENT (manager not installed) or non-zero (file not owned by it).
+    }
+  }
+  // A plain extracted tarball is what is left (Arch and manual installs).
+  return 'tar';
+}
+
 ipcMain.handle('check-for-updates', async () => {
   const channel = normalizeChannel(getSetting('updateChannel', 'stable'));
   const currentVersion = app.getVersion();
@@ -7206,7 +7252,8 @@ ipcMain.handle('check-for-updates', async () => {
       channel,
       currentVersion,
       platform: process.platform,
-      arch: process.arch
+      arch: process.arch,
+      installKind: detectInstallKind()
     });
 
     latestUpdateInfo = result.updateAvailable ? { ...result, currentVersion } : null;
@@ -7216,14 +7263,7 @@ ipcMain.handle('check-for-updates', async () => {
   }
 });
 
-ipcMain.handle('install-update', async () => {
-  if (!latestUpdateInfo) throw new Error("No update information available. Check for updates first.");
-  if (!latestUpdateInfo.download_url) {
-    throw new Error(`Version ${latestUpdateInfo.version} has no automatic update package for this platform. Download it from ${latestUpdateInfo.release_url || 'https://github.com/nebuff/Napture/releases'}.`);
-  }
-  
-  isUpdating = true;
-
+function openUpdaterWindow() {
   let logoBase64 = '';
   try {
     const logoPath = path.join(__dirname, 'logo.png');
@@ -7234,7 +7274,7 @@ ipcMain.handle('install-update', async () => {
     console.error('Failed to read logo.png for updater:', e);
   }
 
-  updaterWindow = new BrowserWindow({
+  const win = new BrowserWindow({
     width: 460,
     height: 300,
     frame: false,
@@ -7250,6 +7290,161 @@ ipcMain.handle('install-update', async () => {
       contextIsolation: true
     }
   });
+
+  const updaterHtmlPath = path.join(app.getPath('userData'), 'updater.html');
+  try {
+    fs.writeFileSync(updaterHtmlPath, getUpdaterHtml(logoBase64), 'utf8');
+    win.loadFile(updaterHtmlPath);
+  } catch (e) {
+    console.error('Failed to write/load updater HTML:', e);
+  }
+  return win;
+}
+
+function sendUpdaterProgress(payload) {
+  if (updaterWindow && !updaterWindow.isDestroyed()) {
+    updaterWindow.webContents.send('update-download-progress', payload);
+  }
+}
+
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+// Streams an update package into destPath, emitting the same progress events the
+// updater window renders for the zip flow.
+function downloadUpdateToFile(url, destPath, done, fail, redirectCount = 0) {
+  if (redirectCount > 5) {
+    fail(new Error('Too many redirects while downloading update.'));
+    return;
+  }
+
+  const file = fs.createWriteStream(destPath);
+  const reqProto = url.startsWith('https') ? https : http;
+  let settled = false;
+  const finish = (err) => {
+    if (settled) return;
+    settled = true;
+    if (err) {
+      file.destroy();
+      fail(err);
+    } else {
+      done();
+    }
+  };
+
+  file.on('error', (err) => finish(err));
+
+  const req = reqProto.get(url, { headers: { 'User-Agent': `Napture/${app.getVersion()}` } }, (res) => {
+    if ([301, 302, 303, 307, 308].includes(res.statusCode) && res.headers.location) {
+      res.resume();
+      file.destroy();
+      let nextUrl = res.headers.location;
+      if (nextUrl.startsWith('/')) {
+        const parsed = new URL(url);
+        nextUrl = `${parsed.protocol}//${parsed.host}${nextUrl}`;
+      }
+      downloadUpdateToFile(nextUrl, destPath, done, fail, redirectCount + 1);
+      return;
+    }
+
+    if (res.statusCode !== 200) {
+      res.resume();
+      finish(new Error('Failed to download update (HTTP ' + res.statusCode + ')'));
+      return;
+    }
+
+    const totalBytes = parseInt(res.headers['content-length'] || '0', 10);
+    let receivedBytes = 0;
+    const startTime = Date.now();
+
+    res.on('data', (chunk) => {
+      receivedBytes += chunk.length;
+      file.write(chunk);
+      const percent = totalBytes ? Math.round((receivedBytes / totalBytes) * 100) : 0;
+      const elapsedMs = Date.now() - startTime;
+      const speedBps = elapsedMs > 0 ? (receivedBytes / (elapsedMs / 1000)) : 0;
+      const remainingSeconds = totalBytes && speedBps > 0
+        ? Math.round((totalBytes - receivedBytes) / speedBps)
+        : 0;
+      sendUpdaterProgress({ percent, receivedBytes, totalBytes, speedBps, remainingSeconds, isExtracting: false });
+    });
+
+    res.on('end', () => file.end());
+    file.on('close', () => finish(null));
+  });
+
+  req.on('error', (err) => finish(err));
+  req.setTimeout(60000, () => req.destroy(new Error('Timed out downloading update')));
+}
+
+// AppImages are plain single files the user owns, so the swap needs no root:
+// wait for this process to exit, overwrite the file, relaunch it.
+function replaceAppImage(newFilePath) {
+  const target = process.env.APPIMAGE;
+  if (!target || !fs.existsSync(target)) {
+    throw new Error('This copy is not running from an AppImage, so it cannot be replaced automatically.');
+  }
+  try {
+    fs.accessSync(target, fs.constants.W_OK);
+  } catch (e) {
+    throw new Error(`No permission to replace ${target}. The new AppImage was downloaded to ${newFilePath}.`);
+  }
+
+  const scriptPath = path.join(app.getPath('temp'), 'napture-appimage-update.sh');
+  const script = `#!/bin/bash
+TARGET=${shellQuote(target)}
+NEW=${shellQuote(newFilePath)}
+PID=${process.pid}
+while kill -0 "$PID" 2>/dev/null; do sleep 0.3; done
+cp -f "$NEW" "$TARGET" && chmod +x "$TARGET"
+rm -f "$NEW"
+nohup "$TARGET" >/dev/null 2>&1 &
+rm -f "$0"
+`;
+  fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+  const child = spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' });
+  child.unref();
+  setTimeout(() => app.exit(0), 600);
+}
+
+// The portable build runs from a temp copy; the file the user launches lives in
+// PORTABLE_EXECUTABLE_FILE, so it can be swapped for the new one and relaunched.
+function replacePortableExecutable(newFilePath) {
+  const target = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath;
+  const scriptPath = path.join(app.getPath('temp'), 'napture-portable-update.cmd');
+  const script = `@echo off
+setlocal
+set "NEW=${newFilePath}"
+set "TARGET=${target}"
+powershell -NoProfile -WindowStyle Hidden -Command "Wait-Process -Id ${process.pid} -ErrorAction SilentlyContinue"
+move /y "%NEW%" "%TARGET%" >nul 2>&1
+start "" "%TARGET%"
+del /f /q "%~f0"
+`;
+  fs.writeFileSync(scriptPath, script, 'utf8');
+  const child = spawn('cmd.exe', ['/c', scriptPath], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  setTimeout(() => app.exit(0), 600);
+}
+
+// The NSIS installer upgrades the existing install itself; quit so it can
+// replace files in Program Files (it raises its own elevation prompt).
+function launchInstaller(filePath) {
+  const child = spawn(filePath, [], { detached: true, stdio: 'ignore' });
+  child.unref();
+  setTimeout(() => app.exit(0), 1200);
+}
+
+ipcMain.handle('install-update', async () => {
+  if (!latestUpdateInfo) throw new Error("No update information available. Check for updates first.");
+  if (!latestUpdateInfo.download_url) {
+    throw new Error(`Version ${latestUpdateInfo.version} has no automatic update package for this platform. Download it from ${latestUpdateInfo.release_url || 'https://github.com/nebuff/Napture/releases'}.`);
+  }
+
+  const action = latestUpdateInfo.install_action || 'extract';
+  isUpdating = true;
+  updaterWindow = openUpdaterWindow();
 
   function cleanupAndCloseUpdater(errMsg = null) {
     isUpdating = false;
@@ -7284,12 +7479,30 @@ ipcMain.handle('install-update', async () => {
     }
   });
 
-  const updaterHtmlPath = path.join(app.getPath('userData'), 'updater.html');
-  try {
-    fs.writeFileSync(updaterHtmlPath, getUpdaterHtml(logoBase64), 'utf8');
-    updaterWindow.loadFile(updaterHtmlPath);
-  } catch (e) {
-    console.error('Failed to write/load updater HTML:', e);
+  // AppImage / portable / installer updates are applied by the platform itself,
+  // so they only need the download, not the zip extraction below.
+  if (action !== 'extract') {
+    return new Promise((resolve, reject) => {
+      const tempDir = app.getPath('temp');
+      const fileName = path.basename(latestUpdateInfo.installer_name || `napture-${latestUpdateInfo.version}-update`);
+      const filePath = path.join(tempDir, fileName);
+
+      downloadUpdateToFile(latestUpdateInfo.download_url, filePath, () => {
+        sendUpdaterProgress({ percent: 100, receivedBytes: 0, totalBytes: 0, speedBps: 0, remainingSeconds: 0, isExtracting: true });
+        try {
+          if (action === 'appimage') replaceAppImage(filePath);
+          else if (action === 'portable') replacePortableExecutable(filePath);
+          else launchInstaller(filePath);
+          resolve();
+        } catch (err) {
+          cleanupAndCloseUpdater(err.message || 'Could not apply the update');
+          reject(err);
+        }
+      }, (err) => {
+        cleanupAndCloseUpdater(err.message || 'Network download error');
+        reject(err);
+      });
+    });
   }
 
   return new Promise((resolve, reject) => {

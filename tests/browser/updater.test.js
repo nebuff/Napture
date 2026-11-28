@@ -149,6 +149,18 @@ fi
     expect(shScript).toContain('nohup "$APPIMAGE_TARGET"');
   });
 
+  test('main process detects every install kind and has a native action for each', () => {
+    const source = fs.readFileSync(path.resolve(__dirname, '../../napture/main.js'), 'utf8');
+    expect(source).toContain("return 'appimage'");
+    expect(source).toContain('PORTABLE_EXECUTABLE_FILE');
+    expect(source).toContain("'nsis'");
+    expect(source).toContain("return 'tar'");
+    expect(source).toContain('process.env.SNAP');
+    expect(source).toContain("action === 'appimage'");
+    expect(source).toContain("action === 'portable'");
+    expect(source).toContain('napture-portable-update.cmd');
+  });
+
   test('getUpdaterHtml renders valid updater HTML with or without logoBase64', () => {
     const { getUpdaterHtml } = require('../../napture/updater-ui');
     const htmlWithLogo = getUpdaterHtml('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');

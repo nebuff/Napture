@@ -3746,6 +3746,7 @@ const defaultBrowserCard = document.getElementById('default-browser-card');
 const updateCard = document.getElementById('update-card');
 const mediaCard = document.getElementById('media-card');
 const updateRestartBtn = document.getElementById('update-restart-btn');
+let latestUpdateCheck = null;
 const makeDefaultBtn = document.getElementById('make-default-btn');
 
 // Close buttons
@@ -4017,6 +4018,15 @@ setTimeout(checkDefaultBrowser, 2000); // Check shortly after startup
 // 2. Version Update Integration
 if (updateRestartBtn) {
   updateRestartBtn.addEventListener('click', () => {
+    // rpm/deb installs and platforms without an in-place bundle can only be
+    // upgraded by downloading the published package, so don't fail silently.
+    if (latestUpdateCheck && latestUpdateCheck.manual) {
+      const url = latestUpdateCheck.installer_url || latestUpdateCheck.release_url;
+      if (url && window.naptureAPI && window.naptureAPI.openExternal) {
+        window.naptureAPI.openExternal(url);
+      }
+      return;
+    }
     if (window.naptureAPI && window.naptureAPI.installUpdate) {
       window.naptureAPI.installUpdate().catch(err => console.error(err));
     }
@@ -4026,8 +4036,10 @@ if (updateRestartBtn) {
 function checkUpdates() {
   if (window.naptureAPI && window.naptureAPI.checkForUpdates) {
     window.naptureAPI.checkForUpdates().then(res => {
+      latestUpdateCheck = res || null;
       if (res && res.updateAvailable) {
         isUpdateAvailable = true;
+        if (updateRestartBtn) updateRestartBtn.textContent = res.manual ? 'Download Update' : 'Restart and Update';
         if (updateCard) updateCard.classList.remove('hidden');
       } else {
         isUpdateAvailable = false;

@@ -139,13 +139,16 @@ function selectLatestRelease(releases, options = {}) {
 }
 
 /**
- * Selects a zip asset the in-place updater can extract for this OS/arch.
- * Returns null when the release only ships installers, so callers can point
- * the user at the release page instead of downloading something unusable.
+ * Selects a dedicated update bundle the in-place updater can extract for this
+ * OS/arch. Returns null when the release only ships installers, so callers can
+ * point the user at the release page instead of downloading something unusable.
+ *
+ * Only `*-update.zip` counts: macOS also publishes a .zip, but that one is the
+ * full `.app` bundle, and extracting it over resources/ would wreck the install.
  */
 function selectUpdateAsset(assets, options = {}) {
   const list = Array.isArray(assets) ? assets : [];
-  const zips = list.filter((asset) => asset && typeof asset.name === 'string' && /\.zip$/i.test(asset.name));
+  const zips = list.filter((asset) => asset && typeof asset.name === 'string' && /-update\.zip$/i.test(asset.name));
   if (zips.length === 0) return null;
 
   const osTokens = OS_TOKENS[options.platform] || OS_TOKENS.linux;
@@ -169,9 +172,25 @@ const DOWNLOAD_PREFERENCES = {
   linux: [/\.appimage$/, /\.tar\.gz$/, /\.deb$/, /\.rpm$/]
 };
 
+// The download has to match how Napture was installed: an AppImage does not
+// replace an rpm/deb package, and a portable .exe does not upgrade an NSIS
+// install. `installKind` is detected by the main process (APPIMAGE/SNAP env,
+// the package manager that owns the binary, electron-builder's portable vars).
+// An empty list means "this build is updated elsewhere" (snap/flatpak stores).
+const INSTALL_KIND_PREFERENCES = {
+  appimage: [/\.appimage$/],
+  tar: [/\.tar\.gz$/],
+  deb: [/\.deb$/],
+  rpm: [/\.rpm$/],
+  sandbox: [],
+  nsis: [/^(?!.*portable).*\.exe$/],
+  portable: [/portable\.exe$/, /\.exe$/]
+};
+
 /**
  * Selects the best published package to hand to someone who has to install an
- * update by hand. Returns null when the release ships nothing for this OS.
+ * update by hand. Returns null when the release ships nothing for this OS, or
+ * nothing in the format the running copy was installed with.
  */
 function selectDownloadAsset(assets, options = {}) {
   const list = (Array.isArray(assets) ? assets : []).filter(
@@ -186,11 +205,40 @@ function selectDownloadAsset(assets, options = {}) {
   if (pool.length === 0) return null;
 
   const preferences = DOWNLOAD_PREFERENCES[options.platform] || DOWNLOAD_PREFERENCES.linux;
-  for (const pattern of preferences) {
+  const installPreferences = INSTALL_KIND_PREFERENCES[options.installKind];
+  // A detected install format is a hard requirement: falling back to another
+  // format would just repeat the download that could not replace the install.
+  const patterns = installPreferences || preferences;
+  for (const pattern of patterns) {
     const match = pool.find((asset) => pattern.test(asset.name.toLowerCase()));
     if (match) return match;
   }
   return null;
+}
+
+/**
+ * What Napture can do with the selected package:
+ *   extract   - unzip a dedicated update bundle over the app directory
+ *   appimage  - replace the running AppImage and relaunch (no root needed)
+ *   portable  - replace the portable .exe and relaunch
+ *   installer - download and launch the platform installer/upgrader
+ *   manual    - hand the package to the user / release page
+ */
+function resolveInstallAction(options, asset, installer) {
+  if (asset) return 'extract';
+  if (!installer) return 'manual';
+  const name = String(installer.name || '').toLowerCase();
+  if (options.platform === 'linux' && options.installKind === 'appimage' && name.endsWith('.appimage')) {
+    return 'appimage';
+  }
+  if (options.platform === 'win32' && name.endsWith('.exe')) {
+    // Only replace the file when the release really ships a portable build;
+    // otherwise launch the NSIS installer instead of overwriting the exe with
+    // a totally different kind of binary.
+    if (options.installKind === 'portable' && name.includes('portable')) return 'portable';
+    return 'installer';
+  }
+  return 'manual';
 }
 
 /** Builds the IPC payload consumed by the settings page / startup check. */
@@ -211,8 +259,12 @@ function buildUpdateCheckResult(options = {}) {
   });
   const installer = asset ? null : selectDownloadAsset(picked.release.assets, {
     platform: options.platform,
-    arch: options.arch
+    arch: options.arch,
+    installKind: options.installKind
   });
+
+  const installAction = resolveInstallAction(options, asset, installer);
+  const autoInstall = installAction !== 'manual';
 
   return {
     updateAvailable: true,
@@ -222,13 +274,18 @@ function buildUpdateCheckResult(options = {}) {
     prerelease: picked.prerelease,
     release_notes: formatReleaseNotes(picked.release.body),
     release_url: picked.release.html_url || GITHUB_RELEASES_PAGE,
-    download_url: asset ? asset.browser_download_url : null,
+    // The file install-update downloads: an update bundle when one exists,
+    // otherwise the installer/package this copy can actually be upgraded with.
+    download_url: asset
+      ? asset.browser_download_url
+      : (autoInstall && installer ? installer.browser_download_url : null),
     download_size: asset && asset.size ? asset.size : null,
     // Set when only a manual install is possible: the package the user should
     // actually download for this OS/arch, not just a link to the release list.
     installer_url: installer ? installer.browser_download_url : null,
     installer_name: installer ? installer.name : null,
-    manual: !asset
+    install_action: installAction,
+    manual: !autoInstall
   };
 }
 
@@ -246,5 +303,7 @@ module.exports = {
   selectLatestRelease,
   selectUpdateAsset,
   selectDownloadAsset,
+  resolveInstallAction,
+  INSTALL_KIND_PREFERENCES,
   buildUpdateCheckResult
 };

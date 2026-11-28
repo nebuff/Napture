@@ -36,7 +36,11 @@ load_release() {
   [ -n "$VERSION" ] && [ -n "$TAG" ] || die "release state is incomplete: $STATE_FILE"
   if [ "$CHANNEL" != "beta" ]; then CHANNEL="stable"; fi
   RELEASE_TITLE="Napture $VERSION"
-  if [ "$CHANNEL" = "beta" ]; then RELEASE_TITLE="Napture $VERSION Beta"; fi
+  if [ "$CHANNEL" = "beta" ]; then
+    # The tag keeps the -beta suffix, but the title reads better without it:
+    # "Napture 0.22.5 Beta", not "Napture 0.22.5-beta Beta".
+    RELEASE_TITLE="Napture ${VERSION%-beta*} Beta"
+  fi
 }
 
 repo_slug() { # prints owner/repo from the origin remote

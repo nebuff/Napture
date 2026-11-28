@@ -121,9 +121,16 @@ describe('updater-core asset selection', () => {
     asset('latest-mac.yml')
   ];
 
-  test('prefers a platform + arch zip when one exists', () => {
-    const picked = selectUpdateAsset(assets, { platform: 'darwin', arch: 'x64' });
-    expect(picked.name).toBe('napture-0.24.0-x64-macos.zip');
+  test('prefers a platform + arch update bundle when one exists', () => {
+    const withBundle = assets.concat(asset('napture-0.24.0-x64-macos-update.zip'));
+    const picked = selectUpdateAsset(withBundle, { platform: 'darwin', arch: 'x64' });
+    expect(picked.name).toBe('napture-0.24.0-x64-macos-update.zip');
+  });
+
+  test('never treats the full macOS .app zip as an in-place update bundle', () => {
+    // The macOS zip is the .app bundle; extracting it over resources/ would
+    // wreck the install, so it must stay a manual download.
+    expect(selectUpdateAsset(assets, { platform: 'darwin', arch: 'x64' })).toBeNull();
   });
 
   test('returns null when the release only ships installers', () => {
@@ -148,6 +155,35 @@ describe('updater-core asset selection', () => {
     ];
     expect(selectDownloadAsset(arm, { platform: 'linux', arch: 'arm64' }).name)
       .toBe('napture-0.24.0-arm64-linux.AppImage');
+  });
+
+  test('prefers the package format the Linux copy was installed with', () => {
+    const linux = [
+      asset('napture-0.24.0-x86_64-linux.AppImage'),
+      asset('napture-0.24.0-amd64-linux.deb'),
+      asset('napture-0.24.0-x86_64-linux.rpm'),
+      asset('napture-0.24.0-x64-linux.tar.gz')
+    ];
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64', installKind: 'rpm' }).name)
+      .toBe('napture-0.24.0-x86_64-linux.rpm');
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64', installKind: 'deb' }).name)
+      .toBe('napture-0.24.0-amd64-linux.deb');
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64', installKind: 'appimage' }).name)
+      .toBe('napture-0.24.0-x86_64-linux.AppImage');
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64', installKind: 'tar' }).name)
+      .toBe('napture-0.24.0-x64-linux.tar.gz');
+  });
+
+  test('never hands an rpm install a package of another format', () => {
+    const linux = [
+      asset('napture-0.24.0-x86_64-linux.AppImage'),
+      asset('napture-0.24.0-amd64-linux.deb')
+    ];
+    // Falling back to the AppImage is what made rpm/deb updates do nothing.
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64', installKind: 'rpm' })).toBeNull();
+    // Without a detected install kind the generic preference order still applies.
+    expect(selectDownloadAsset(linux, { platform: 'linux', arch: 'x64' }).name)
+      .toBe('napture-0.24.0-x86_64-linux.AppImage');
   });
 
   test('prefers the Windows installer over the portable build', () => {
@@ -176,25 +212,62 @@ describe('updater-core asset selection', () => {
   });
 });
 
+// One release carrying every artifact the build publishes, per platform + arch.
+const PLATFORM_ASSETS = [
+  asset('napture-0.24.0-x64-windows.exe'),
+  asset('napture-0.24.0-x64-windows-portable.exe'),
+  asset('napture-0.24.0-arm64-windows.exe'),
+  asset('napture-0.24.0-x64-macos.dmg'),
+  asset('napture-0.24.0-arm64-macos.dmg'),
+  asset('napture-0.24.0-x64-macos.zip'),
+  asset('napture-0.24.0-x86_64-linux.AppImage'),
+  asset('napture-0.24.0-arm64-linux.AppImage'),
+  asset('napture-0.24.0-amd64-linux.deb'),
+  asset('napture-0.24.0-x86_64-linux.rpm'),
+  asset('napture-0.24.0-arm64-linux.rpm'),
+  asset('napture-0.24.0-x64-linux.tar.gz'),
+  asset('latest-mac.yml')
+];
+
 describe('updater-core check result', () => {
   test('reports the release page and marks the update manual when nothing is installable', () => {
     const result = buildUpdateCheckResult({
       releases: [makeRelease('0.23.0', { body: 'Bug fixes\nMore speed', assets: [asset('napture-0.23.0-x64-windows.exe')] })],
       channel: 'stable',
       currentVersion: '0.22.1',
-      platform: 'win32',
-      arch: 'x64'
+      platform: 'linux',
+      arch: 'x64',
+      installKind: 'rpm'
     });
 
     expect(result.updateAvailable).toBe(true);
     expect(result.version).toBe('0.23.0');
     expect(result.manual).toBe(true);
+    expect(result.install_action).toBe('manual');
     expect(result.download_url).toBeNull();
     expect(result.release_url).toContain('/releases/tag/v0.23.0');
     expect(result.release_notes).toContain('Bug fixes');
-    // The release does ship something for Windows; report it instead of nothing.
-    expect(result.installer_name).toBe('napture-0.23.0-x64-windows.exe');
-    expect(result.installer_url).toContain('napture-0.23.0-x64-windows.exe');
+    expect(result.installer_name).toBeNull();
+  });
+
+  test('reports the installer that matches a detected rpm install', () => {
+    const result = buildUpdateCheckResult({
+      releases: [makeRelease('0.23.0', {
+        assets: [
+          asset('napture-0.23.0-x86_64-linux.AppImage'),
+          asset('napture-0.23.0-x86_64-linux.rpm')
+        ]
+      })],
+      channel: 'stable',
+      currentVersion: '0.22.1',
+      platform: 'linux',
+      arch: 'x64',
+      installKind: 'rpm'
+    });
+
+    expect(result.manual).toBe(true);
+    expect(result.installer_name).toBe('napture-0.23.0-x86_64-linux.rpm');
+    expect(result.installer_url).toContain('napture-0.23.0-x86_64-linux.rpm');
   });
 
   test('reports no installer when the release has nothing for the platform', () => {
@@ -218,9 +291,9 @@ describe('updater-core check result', () => {
     expect(settingsSource).toContain('naptureAPI.openExternal');
   });
 
-  test('provides an absolute download url for an installable zip', () => {
+  test('provides an absolute download url for an installable update bundle', () => {
     const result = buildUpdateCheckResult({
-      releases: [makeRelease('0.23.0', { assets: [asset('napture-0.23.0-arm64-macos.zip')] })],
+      releases: [makeRelease('0.23.0', { assets: [asset('napture-0.23.0-arm64-macos-update.zip')] })],
       channel: 'stable',
       currentVersion: '0.22.1',
       platform: 'darwin',
@@ -228,7 +301,70 @@ describe('updater-core check result', () => {
     });
 
     expect(result.manual).toBe(false);
+    expect(result.install_action).toBe('extract');
     expect(result.download_url).toMatch(/^https:\/\/github\.com\/.+\/releases\/download\//);
+  });
+
+  test.each([
+    ['win32', 'x64', 'nsis', 'installer', 'napture-0.24.0-x64-windows.exe'],
+    ['win32', 'arm64', 'nsis', 'installer', 'napture-0.24.0-arm64-windows.exe'],
+    ['win32', 'x64', 'portable', 'portable', 'napture-0.24.0-x64-windows-portable.exe'],
+    ['darwin', 'x64', 'mac', 'manual', 'napture-0.24.0-x64-macos.dmg'],
+    ['darwin', 'arm64', 'mac', 'manual', 'napture-0.24.0-arm64-macos.dmg'],
+    ['linux', 'x64', 'appimage', 'appimage', 'napture-0.24.0-x86_64-linux.AppImage'],
+    ['linux', 'arm64', 'appimage', 'appimage', 'napture-0.24.0-arm64-linux.AppImage'],
+    ['linux', 'x64', 'deb', 'manual', 'napture-0.24.0-amd64-linux.deb'],
+    ['linux', 'x64', 'rpm', 'manual', 'napture-0.24.0-x86_64-linux.rpm'],
+    ['linux', 'arm64', 'rpm', 'manual', 'napture-0.24.0-arm64-linux.rpm'],
+    ['linux', 'x64', 'tar', 'manual', 'napture-0.24.0-x64-linux.tar.gz']
+  ])('%s/%s install (%s) uses %s with %s', (platform, arch, installKind, action, name) => {
+    const result = buildUpdateCheckResult({
+      releases: [makeRelease('0.24.0', { assets: PLATFORM_ASSETS })],
+      channel: 'stable',
+      currentVersion: '0.23.0',
+      platform,
+      arch,
+      installKind
+    });
+
+    expect(result.updateAvailable).toBe(true);
+    expect(result.install_action).toBe(action);
+    expect(result.installer_name).toBe(name);
+    if (action === 'manual') {
+      expect(result.download_url).toBeNull();
+    } else {
+      expect(result.download_url).toContain(name);
+    }
+  });
+
+  test('a portable install falls back to the installer when no portable build ships', () => {
+    const result = buildUpdateCheckResult({
+      releases: [makeRelease('0.24.0', { assets: [asset('napture-0.24.0-x64-windows.exe')] })],
+      channel: 'stable',
+      currentVersion: '0.23.0',
+      platform: 'win32',
+      arch: 'x64',
+      installKind: 'portable'
+    });
+
+    // Launching NSIS is fine; overwriting the portable .exe with it is not.
+    expect(result.install_action).toBe('installer');
+    expect(result.installer_name).toBe('napture-0.24.0-x64-windows.exe');
+  });
+
+  test('sandboxed Linux builds (snap/flatpak) are never handed a package', () => {
+    const result = buildUpdateCheckResult({
+      releases: [makeRelease('0.24.0', { assets: PLATFORM_ASSETS })],
+      channel: 'stable',
+      currentVersion: '0.23.0',
+      platform: 'linux',
+      arch: 'x64',
+      installKind: 'sandbox'
+    });
+
+    expect(result.install_action).toBe('manual');
+    expect(result.installer_url).toBeNull();
+    expect(result.release_url).toContain('/releases');
   });
 
   test('returns updateAvailable false when the channel has nothing newer', () => {
